@@ -1,50 +1,60 @@
-import pygame
-import time
 import socket
+import sys
+import time
 
-def main(ip_server):
-    serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
-    print("1")
+import pygame
 
-    serverSocket.bind((ip_server, 7070)) #replace
-    print("2")
-    serverSocket.listen(1)
-    print("socket listening")
-    
-    pygame.joystick.init()
-    joysticks = [pygame.joystick.Joystick(x) for x in range(pygame.joystick.get_count())]
-    pygame.init()
-    
-    (clientConnected, clientAddress) = serverSocket.accept()
-    
-    
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+
+def main(ip_server, stop_event):
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket = None
+    server_socket.settimeout(0.5)
+
+    try:
+        pygame.joystick.init()
+        if pygame.joystick.get_count() == 0:
+            raise RuntimeError("No joystick detected")
+
+        joystick = pygame.joystick.Joystick(0)
+        joystick.init()
+
+        server_socket.bind((ip_server, 7070))
+        server_socket.listen(1)
+        print("Direction socket listening")
+
+        while not stop_event.is_set():
+            try:
+                client_socket, client_address = server_socket.accept()
                 break
-            if event.type == pygame.JOYBUTTONDOWN:
-                print(event)
-        buttonNorm = (pygame.joystick.Joystick(0).get_button(3)) #10
-        buttonInv = (pygame.joystick.Joystick(0).get_button(5)) #11
-        if(buttonNorm == 1):
-            clientConnected.send(("a").encode())
-            print("normal mode")
-            #print("a")
-        elif(buttonInv == 1):
-            clientConnected.send(("b").encode())
-            print("inverse mode")
-            #print("b")
+            except socket.timeout:
+                continue
         else:
-            clientConnected.send(("c").encode())
-            #print("c")
-        time.sleep(.01)
+            return
+
+        while not stop_event.is_set():
+            if joystick.get_button(3):
+                direction = "a"
+                print("normal mode")
+            elif joystick.get_button(5):
+                direction = "b"
+                print("inverse mode")
+            else:
+                direction = "c"
+
+            client_socket.sendall(direction.encode("ascii") + b"\n")
+            time.sleep(0.01)
+    finally:
+        if client_socket is not None:
+            client_socket.close()
+        server_socket.close()
+
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 2:
+        print("Usage: python piServer.py <ip_server>")
+        raise SystemExit(1)
+    import threading
 
-
-
-
-
-    
+    pygame.init()
+    main(sys.argv[1], threading.Event())
+    pygame.quit()

@@ -1,36 +1,64 @@
-#import main libraries
-import pygame
-import time
-import socket
+import queue
 import threading
 
-#import the threaded files
+import pygame
+
 import joyServer
-
-#import gripperServer
-import laserServer  
-
+import laserServer
 import piServer
 
-global ip_server
-ip_server = "192.168.1.67" #192.168.1.100
 
-joystickCode = threading.Thread(target=joyServer.main, args = (ip_server,))
-inverseCode = threading.Thread(target=piServer.main, args = (ip_server,))
-#gripperCode = threading.Thread(target=gripperServer.main, args=(ip_server,))
-laserCode = threading.Thread(target=laserServer.main, args=(ip_server,))
+IP_SERVER = "192.168.1.67"
 
 
+def main():
+    pygame.init()
+    stop_event = threading.Event()
+    errors = queue.Queue()
 
-joystickCode.start()                                                                                                                            
-inverseCode.start()
-#gripperCode.start()
-laserCode.start()
+    def run_server(name, target):
+        try:
+            target(IP_SERVER, stop_event)
+            if not stop_event.is_set():
+                errors.put((name, RuntimeError("server exited unexpectedly")))
+                stop_event.set()
+        except Exception as exc:
+            errors.put((name, exc))
+            stop_event.set()
+
+    servers = [
+        threading.Thread(
+            target=run_server,
+            args=("joystick", joyServer.main),
+            name="joystick-server",
+        ),
+        threading.Thread(
+            target=run_server,
+            args=("direction", piServer.main),
+            name="direction-server",
+        ),
+        threading.Thread(
+            target=run_server,
+            args=("laser", laserServer.main),
+            name="laser-server",
+        ),
+    ]
+
+    try:
+        for server in servers:
+            server.start()
+        for server in servers:
+            server.join()
+    finally:
+        pygame.quit()
+
+    if not errors.empty():
+        failures = []
+        while not errors.empty():
+            name, exc = errors.get()
+            failures.append(f"{name}: {exc!r}")
+        raise RuntimeError("Server worker failure(s): " + "; ".join(failures))
 
 
-
-
-joystickCode.join()
-inverseCode.join()
-#gripperCode.join()
-laserCode.join()
+if __name__ == "__main__":
+    main()

@@ -6,42 +6,44 @@ import time
 import pygame
 
 
-def main(ip_server):
-    serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    serverSocket.settimeout(10.0)
-    print(ip_server)
-
-    pygame.init()
-    pygame.joystick.init()
-
-    if pygame.joystick.get_count() == 0:
-        print("No joystick detected")
-        serverSocket.close()
-        return
-
-    joystick = pygame.joystick.Joystick(0)
-    joystick.init()
+def main(ip_server, stop_event):
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket = None
+    server_socket.settimeout(0.5)
 
     try:
-        serverSocket.bind((ip_server, 9090))
-        serverSocket.listen(1)
-        print("socket listening joystick")
-        clientConnected, clientAddress = serverSocket.accept()
-    except OSError as exc:
-        print(f"Failed to bind/listen for joystick server: {exc}")
-        serverSocket.close()
-        return
+        pygame.joystick.init()
+        if pygame.joystick.get_count() == 0:
+            raise RuntimeError("No joystick detected")
 
-    mode = 0
-    prev_mode = mode
-    ratio = 0.6
+        joystick = pygame.joystick.Joystick(0)
+        joystick.init()
 
-    try:
-        while True:
+        server_socket.bind((ip_server, 9090))
+        server_socket.listen(1)
+        print("Joystick socket listening")
+
+        while not stop_event.is_set():
+            try:
+                client_socket, client_address = server_socket.accept()
+                break
+            except socket.timeout:
+                continue
+        else:
+            return
+
+        client_socket.settimeout(1.0)
+        mode = 0
+        previous_mode = mode
+        ratio = 0.6
+
+        while not stop_event.is_set():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    print("Joystick server shutting down")
+                    stop_event.set()
                     return
+                if event.type == pygame.JOYDEVICEREMOVED:
+                    raise RuntimeError("Joystick disconnected")
 
             if joystick.get_button(1):
                 mode = 0
@@ -50,61 +52,41 @@ def main(ip_server):
             elif joystick.get_button(2):
                 mode = 0.5
 
-            x_speed = joystick.get_axis(0)
-            y_speed = joystick.get_axis(1)
-            r_speed = joystick.get_axis(2)
-            v_speed = joystick.get_axis(3)
-
-            if mode == 0:
-                x_speed = y_speed = r_speed = v_speed = 0
-            else:
-                x_speed *= mode
-                y_speed *= mode
-                r_speed *= mode
-                v_speed *= mode
-
-                if mode == 0.5:
-                    x_speed *= ratio
-                    y_speed *= ratio
-                    r_speed *= ratio
-                    v_speed *= ratio
-
-            if mode != prev_mode:
-                if mode == 1:
-                    print("FAST MODE")
-                elif mode == 0.5:
-                    print("SLOW MODE")
-                elif mode == 0:
-                    print("STOP MODE")
-            prev_mode = mode
-
-            thrusterMovements = {
-                'x_speed': x_speed,
-                'y_speed': y_speed,
-                'r_speed': r_speed,
-                'v_speed': v_speed,
+            speeds = {
+                "x_speed": joystick.get_axis(0) * mode,
+                "y_speed": joystick.get_axis(1) * mode,
+                "r_speed": joystick.get_axis(2) * mode,
+                "v_speed": joystick.get_axis(3) * mode,
             }
 
-            message = json.dumps(thrusterMovements).encode()
-            try:
-                clientConnected.send(message)
-            except (BrokenPipeError, OSError):
-                print("Client disconnected")
-                return
+            if mode == 0.5:
+                speeds = {key: value * ratio for key, value in speeds.items()}
 
-            print(f"Time:{time.time()} | x_speed:{x_speed} | y_speed:{y_speed} | r_speed:{r_speed} | v_speed:{v_speed}")
+            if mode != previous_mode:
+                mode_name = {0: "STOP", 0.5: "SLOW", 1: "FAST"}[mode]
+                print(f"{mode_name} MODE")
+                previous_mode = mode
+
+            message = json.dumps(speeds).encode("utf-8") + b"\n"
+            client_socket.sendall(message)
+
+            print(
+                f"Time:{time.time()} | "
+                + " | ".join(f"{key}:{value}" for key, value in speeds.items())
+            )
             time.sleep(0.01)
     finally:
-        try:
-            clientConnected.close()
-        except Exception:
-            pass
-        serverSocket.close()
-        pygame.quit()
+        if client_socket is not None:
+            client_socket.close()
+        server_socket.close()
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python joyServer.py <ip_server>")
         raise SystemExit(1)
-    main(sys.argv[1])
+    import threading
+
+    pygame.init()
+    main(sys.argv[1], threading.Event())
+    pygame.quit()

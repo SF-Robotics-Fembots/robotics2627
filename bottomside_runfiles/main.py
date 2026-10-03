@@ -1,41 +1,46 @@
-import pygame
+import queue
+import threading
+import time
+
+import adafruit_pca9685
 import board
 import busio
-import adafruit_pca9685
-from adafruit_servokit import ServoKit
-import time
-import threading
-import socket
+import pygame
 
-
-#import threaded files
 import thrusters
-#import gripper
-#import pump
 
-# library setup
 
-pygame.init()
-i2c = busio.I2C(board.SCL, board.SDA)
-shield = adafruit_pca9685.PCA9685(i2c)
-kit = ServoKit(channels=16)
-shield.frequency = 100
+IP_SERVER = "192.168.1.67"
 
-#global ip variable setup
-global ip_server
-ip_server = "192.168.1.67" #192.168.1.100
-    
 
-thrusterCode = threading.Thread(target=thrusters.main, args = (ip_server,))
-#gripperCode = threading.Thread(target=gripper.main, args=(ip_server,))
-#pumpCode = threading.Thread(target=pump.main, args=(ip_server,))
+def main():
+    pygame.init()
+    i2c = busio.I2C(board.SCL, board.SDA, frequency=50000)
+    shield = adafruit_pca9685.PCA9685(i2c)
 
-print ("heeeeyyyyy")
+    # Configure the PCA9685 external clock at approximately 100 Hz.
+    shield.mode1_reg = 0x10
+    shield.mode1_reg = 0x10 | 0x40
+    shield.prescale_reg = 60
+    shield.mode1_reg = 0x40 | 0x20
+    time.sleep(0.005)
 
-thrusterCode.start()
-#gripperCode.start()
-#pumpCode.start()
+    errors = queue.Queue()
 
-thrusterCode.join()
-#gripperCode.join()
-#pumpCode.join()
+    def run_thrusters():
+        try:
+            thrusters.main(IP_SERVER, shield)
+        except Exception as exc:
+            errors.put(exc)
+
+    thruster_thread = threading.Thread(target=run_thrusters, name="thrusters")
+    thruster_thread.start()
+    thruster_thread.join()
+
+    pygame.quit()
+    if not errors.empty():
+        raise RuntimeError("Thruster controller failed") from errors.get()
+
+
+if __name__ == "__main__":
+    main()

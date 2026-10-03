@@ -1,14 +1,10 @@
-import pygame   #pip install pygame
-import board	#pip install board
-import busio	#pip install adafruit-blinka
-import adafruit_pca9685 #pip install adafruit-circuitpython-pca9685
-#from adafruit_servokit import ServoKit #pip install adafruit-circuitpython-servokit
+import json
+import math
+import socket
 import time
-import socket, json, sys
 
-def main(ip_server):
-	# library setup
-	pygame.init()
+
+def main(ip_server, shield):
 
 	#setting up the median of the 'off' values for the thrusters
 	horiz_off_value = 1500
@@ -45,35 +41,13 @@ def main(ip_server):
 	rot_comp = 0#was -0.08
 	slide_comp =0 #0.19
 
-	i2c = busio.I2C(board.SCL, board.SDA, frequency=50000)
-	#i2c.write_byte_data(0x40, 0x00, 0x10)
-	#time.sleep(0.01)
-	#i2c.write_byte_data(0x40, 0x00, 0x50)
-	#time.sleep(0.01)
-	shield = adafruit_pca9685.PCA9685(i2c)
-
-	# Manual external-clock + frequency setup (PCA9685 datasheet §7.3.5).
-	# The library's shield.external_clock setter is a no-op on this install, so
-	# we write the registers directly. EXTCLK can only be latched while SLEEP=1,
-	# and can only be cleared by a power cycle / software reset.
-	shield.mode1_reg = 0x10              # SLEEP=1
-	shield.mode1_reg = 0x10 | 0x40       # SLEEP=1 + EXTCLK=1 (latches external 25MHz clock)
-	shield.prescale_reg = 60             # 25e6 / (4096 * 100Hz) - 1 = 60  → ~100Hz PWM
-	shield.mode1_reg = 0x40 | 0x20       # EXTCLK=1 + AI=1, wake up
-	time.sleep(0.005)
-
-	mode1 = shield.mode1_reg
-	print(f"PCA9685 MODE1 = 0x{mode1:02X}  EXTCLK={'ON' if mode1 & 0x40 else 'OFF'}")
-
 	thrusterChannel1 = shield.channels[8] #J16
 	thrusterChannel2 = shield.channels[12] #J9
 	thrusterChannel3 = shield.channels[13] #J8
 	thrusterChannel4 = shield.channels[11] #J10
 	thrusterChannel5 = shield.channels[9] #J19
 	thrusterChannel6 = shield.channels[14] #J2
-	thrusterChannel1.duty_cycle = 0x2666
-
-	thrusters = [
+	allThrusters = [
 		thrusterChannel1,
 		thrusterChannel2,
 		thrusterChannel3,
@@ -81,6 +55,13 @@ def main(ip_server):
 		thrusterChannel5,
 		thrusterChannel6
 	]
+
+	def set_neutral():
+		neutral_duty = int(neutral_pwm / 10000 * 65536)
+		for channel in allThrusters:
+			channel.duty_cycle = neutral_duty
+
+	set_neutral()
 
 	def set_throttle(channel, throttle_in, delay=0):
 		throttlePW = int(throttle_in / 10000 * 65536)
@@ -121,66 +102,6 @@ def main(ip_server):
 	# 		set_throttle(channel, throttle, delay=0)
 
 
-	throttle_in = 2200
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel1.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1500
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel1.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 2200
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel2.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1500
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel2.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 2200
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel3.duty_cycle = throttlePW
-	time.sleep(0 )
-
-	throttle_in = 1500
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel3.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 2200
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel4.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1500
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel4.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1750
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel5.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1500
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel5.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1750
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel6.duty_cycle = throttlePW
-	time.sleep(0)
-
-	throttle_in = 1500
-	throttlePW = int(throttle_in/10000*65536)
-	thrusterChannel6.duty_cycle = throttlePW
-	time.sleep(0)
-	
 	#horizontal thrusters calculations
 	def calcHorizontal(joyValue, thrusterNum, direction):
 		if (-5 <= joyValue <= 5):         # can adjust to create deadzone
@@ -203,10 +124,19 @@ def main(ip_server):
 	clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	
 	clientSocket1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # 192.169.1.100 is comp computer ip
+	try:
+		clientSocket.connect((ip_server, 9090))
+		clientSocket1.connect((ip_server, 7070))
+		clientSocket.settimeout(2.0)
+		clientSocket1.settimeout(2.0)
+	except OSError:
+		clientSocket.close()
+		clientSocket1.close()
+		set_neutral()
+		raise
 
-	clientSocket.connect((ip_server, 9090))
-	clientSocket1.connect((ip_server, 7070))
+	joystick_stream = clientSocket.makefile("rb")
+	direction_stream = clientSocket1.makefile("rb")
 	print("connected")
 	prevX = 0
 	prevY = 0
@@ -220,15 +150,30 @@ def main(ip_server):
 	# main loop
 	while True:
 		try:
-			dataFraud = (clientSocket.recv(1024)).decode()
-			first_dict_end = dataFraud.find("}")
-			dataFraud = dataFraud[0:(first_dict_end+1)]
+			message = joystick_stream.readline()
+			if not message:
+				raise ConnectionError("Joystick client disconnected")
+			dataFraud = message.decode("utf-8").strip()
 			thrusterMovements = json.loads(dataFraud)
+			if not isinstance(thrusterMovements, dict):
+				raise ValueError("Joystick message must be a JSON object")
+
+			speed_keys = ("x_speed", "y_speed", "r_speed", "v_speed")
+			speeds = [thrusterMovements.get(key) for key in speed_keys]
+			if any(
+				isinstance(value, bool)
+				or not isinstance(value, (int, float))
+				or not math.isfinite(value)
+				or not -1 <= value <= 1
+				for value in speeds
+			):
+				raise ValueError("Joystick speeds must be finite numbers in [-1, 1]")
+
+			thrusterMovements = dict(zip(speed_keys, map(float, speeds)))
 			#print(thrusterMovements)
 			#time.sleep(1)
 			if debug_l2: print("datafraud: " + dataFraud)
 			#data = (clientSocket.recv(1024)).decode()
-			if debug_l2: print("data " + data)
 
 			print(f"Loop Start -------------------------------------------------")
 
@@ -300,14 +245,18 @@ def main(ip_server):
 			r_speed = int(r_speed + slide_comp * x_speed)
 
 			
-			directionRecieved = ((clientSocket1.recv(1024)).decode())
-			directionRecieved = directionRecieved[0]
+			direction_message = direction_stream.readline()
+			if not direction_message:
+				raise ConnectionError("Direction client disconnected")
+			directionRecieved = direction_message.decode("ascii").strip()
 			if (directionRecieved == "a"):
 				direction = 1
 			elif (directionRecieved == "b"):
 				direction = -1
-			else:
+			elif directionRecieved == "c":
 				direction = direction
+			else:
+				raise ValueError(f"Invalid direction message: {directionRecieved!r}")
 			if debug_l2: print(directionRecieved)
 			if debug_l2: print(direction)
 
@@ -400,26 +349,23 @@ def main(ip_server):
 
 
 			# static power limiting
-			finalHorDiff = abs(powerThrusterVals[1] - horiz_off_value)
-			finalVertDiff = abs(powerVertThrusterVals[1] - vert_off_value)
-			finalTotal = (finalHorDiff * 4) + (finalVertDiff * 2)
+			finalTotal = sum(
+				abs(value - horiz_off_value) for value in powerThrusterVals
+			) + sum(
+				abs(value - vert_off_value) for value in powerVertThrusterVals
+			)
 			print(f"Final Total: {finalTotal}")
-			if (finalTotal != 0):
-				percent = (1200/finalTotal) #2400
-				print(f"Power Multiplier: {percent}")
-				#finds percent to display how much we are exceeding power use (ex. exceeding power limit by 5%)
-				if (finalTotal > 1200): #was 1950, max 2934
-					for thruster in range(0, 4):
-						Diff = powerThrusterVals[thruster] - horiz_off_value
-						newDiff = Diff * (percent)
-						powerThrusterVals[thruster] = horiz_off_value + newDiff
-					for vertThruster in range(0, 2):
-						vertDiff = powerVertThrusterVals[vertThruster] - vert_off_value
-						newVertDiff = vertDiff * (percent)
-						powerVertThrusterVals[vertThruster] = vert_off_value + newVertDiff
-						#finding total thruster throttles and making sure power isnt exceeded
-						#main power limiting
-						#if power is exceeded, then values are made smaller in line 339
+			if finalTotal > 1200:
+				scale = 1200 / finalTotal
+				print(f"Power Multiplier: {scale}")
+				powerThrusterVals = [
+					horiz_off_value + (value - horiz_off_value) * scale
+					for value in powerThrusterVals
+				]
+				powerVertThrusterVals = [
+					vert_off_value + (value - vert_off_value) * scale
+					for value in powerVertThrusterVals
+				]
 
 			#print("third print")
 			#debug_l2 = 1
@@ -439,15 +385,6 @@ def main(ip_server):
 			]
 
 			# Combine corresponding thruster objects
-			allThrusters = [
-				thrusterChannel1,
-				thrusterChannel2,
-				thrusterChannel3,
-				thrusterChannel4,
-				thrusterChannel5,
-				thrusterChannel6
-			]
-
 			# Apply compensated PWM to each thruster and print values in a single row
 			for thruster, val in zip(allThrusters, compensatedPowerVals):
 				thruster.duty_cycle = int(val / 10000 * 65536)
@@ -463,12 +400,13 @@ def main(ip_server):
 			print(f"ESC Values: " + " | ".join(f"{label}:{val}" for label, val in zip(labels, esc_vals)))
 
 
-		except ValueError:
-			print("Error")
-			check = (clientSocket.recv(1024)).decode()
-			print("check: " + check)
-			print("dataFraud: " + dataFraud)
-			print("dataFraud: " + dataFraud, file = sys.stderr)
-
-if __name__ == "__main__":
-    main()
+		except Exception as exc:
+			set_neutral()
+			print(f"Thruster input/connection error: {exc}")
+			joystick_stream.close()
+			direction_stream.close()
+			clientSocket.close()
+			clientSocket1.close()
+			if isinstance(exc, ConnectionError):
+				break
+			raise

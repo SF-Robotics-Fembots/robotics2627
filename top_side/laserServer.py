@@ -1,66 +1,66 @@
+import json
+import socket
 import threading
-import socket, json
-import time, pynput, keyboard
-from pynput.keyboard import Key, Listener 
-#set the port to use in threading
-port = 3030
-#ip_address = "192.168.1.100"
-laser = 0 #start off
 
-def on_release(key):
-    global changed
-    global laser
-    if key == Key.f1:
-        print("laser press")
-        prev_laser = laser #used to compare changes
-
-        #check if the value changed
-        if laser == 0: laser = 1
-        else: laser = 0
-
-        laser_vals = {
-            "lasers" : laser
-        }
-
-        message = json.dumps(laser_vals)
-        message = message.encode()
-
-        #check if changed
-        if prev_laser!= laser:
-            print(message)
-            client_connected.send(message)
+from pynput.keyboard import Key, Listener
 
 
-    #put a sleep in so the speed doesn't break the universe
-    time.sleep(0.1)
-        
-#write the listener
-def on_press(key):
-    #use f1 to press key
-    if key == Key.esc: 
-        print("gripper press")
-        return False
+PORT = 3030
 
 
-#main function
-def main(ip_address):
-    
-    #begin the serversocket
+def main(ip_address, stop_event):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((ip_address, port))
-    server_socket.listen(1)
-    print("socket listening!")
-    global client_connected
+    client_socket = None
+    server_socket.settimeout(0.5)
+    laser_enabled = False
 
-    #accept the client address
-    (client_connected, client_address) = server_socket.accept()
-   
-    #start the listener
-    with Listener(
-        on_press=on_press,
-        on_release=on_release) as listener:
-        listener.join()
+    try:
+        server_socket.bind((ip_address, PORT))
+        server_socket.listen(1)
+        print("Laser socket listening")
 
-#run the function
+        while not stop_event.is_set():
+            try:
+                client_socket, client_address = server_socket.accept()
+                break
+            except socket.timeout:
+                continue
+        else:
+            return
+
+        def on_release(key):
+            nonlocal laser_enabled
+            if key == Key.f1:
+                laser_enabled = not laser_enabled
+                message = json.dumps({"lasers": int(laser_enabled)}).encode("utf-8")
+                try:
+                    client_socket.sendall(message)
+                except OSError as exc:
+                    print(f"Laser client disconnected: {exc}")
+                    stop_event.set()
+                    return False
+
+        def on_press(key):
+            if key == Key.esc:
+                stop_event.set()
+                return False
+
+        with Listener(on_press=on_press, on_release=on_release) as listener:
+            while not stop_event.wait(0.1):
+                if not listener.is_alive():
+                    break
+            if listener.is_alive():
+                listener.stop()
+    finally:
+        if client_socket is not None:
+            client_socket.close()
+        server_socket.close()
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if len(sys.argv) != 2:
+        print("Usage: python laserServer.py <ip_server>")
+        raise SystemExit(1)
+    main(sys.argv[1], threading.Event())
