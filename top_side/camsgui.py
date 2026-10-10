@@ -1,18 +1,20 @@
 #i changed camera switching for screenshot
-import cv2
+import cv2 #pip install opencv-python
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
     QGridLayout, QScrollArea, QSizePolicy,
     QPushButton, QHBoxLayout
-)
+) #pip install PyQt5
 from PyQt5.QtGui import QPixmap, QImage, QFont, QPalette
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 import sys, time, os, json, datetime, queue
+import socket
 import numpy as np
 
 # Target display rate per camera. We always read frames to stay at the live
 # edge, but only process/emit this often so the Qt queue can't back up.
 DISPLAY_FPS = 20
+THRUSTER_TELEMETRY_PORT = 7071
 
 # Base folders for screenshots (D: preferred, home folder as fallback). Each run
 # gets its own dated subfolder under one of these.
@@ -212,6 +214,51 @@ class ScreenshotWriter(QThread):
     def stop(self):
         # queued writes still ahead of the sentinel finish first
         self.queue.put(None)
+
+
+class ThrusterTelemetryListener(QThread):
+    """Receives the latest PWM values sent by the bottomside controller."""
+    telemetry_received = pyqtSignal(object)
+
+    def __init__(self, host="0.0.0.0", port=THRUSTER_TELEMETRY_PORT):
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.running = True
+        self.socket = None
+
+    def run(self):
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind((self.host, self.port))
+            self.socket.settimeout(0.5)
+        except OSError as exc:
+            print(f"Could not start thruster telemetry listener on UDP {self.port}: {exc}")
+            return
+
+        while self.running:
+            try:
+                payload, _sender = self.socket.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            try:
+                data = json.loads(payload.decode("utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("thrusters"), list):
+                    self.telemetry_received.emit(data)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+
+        if self.socket is not None:
+            self.socket.close()
+            self.socket = None
+
+    def stop(self):
+        self.running = False
+        if self.socket is not None:
+            self.socket.close()
 
 
 # --- Screenshot window ---
@@ -481,6 +528,14 @@ class MainWindow(QMainWindow):
 
         self.__SetupStopwatch()
 
+        self.thruster_status = QLabel("Thruster PWM: waiting for bottomside telemetry…")
+        self.thruster_status.setAlignment(Qt.AlignCenter)
+        self.thruster_status.setWordWrap(True)
+        self.thruster_status.setStyleSheet(
+            "color: black; font-size: 16px; font-weight: bold; "
+            "padding: 8px; background: white; border-radius: 8px;"
+        )
+
         self.screenshot_btn = QPushButton("Screenshot!")
         self.screenshot_btn.clicked.connect(self.open_screenshot_window)
         self.screenshot_btn.setStyleSheet("""
@@ -502,6 +557,10 @@ class MainWindow(QMainWindow):
         """)
 
         self.__SetupUI()
+
+        self.thruster_listener = ThrusterTelemetryListener()
+        self.thruster_listener.telemetry_received.connect(self.update_thruster_status)
+        self.thruster_listener.start()
 
         self.cam_threads = []
         for i, url in enumerate(self.urls):
@@ -664,6 +723,21 @@ class MainWindow(QMainWindow):
         except OSError as e:
             print(f"Could not save screenshot default camera: {e}")
 
+    def update_thruster_status(self, data):
+        values = data.get("thrusters", [])
+        if not values:
+            return
+        rendered = []
+        for index, item in enumerate(values):
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label", f"T{index + 1}"))
+            pwm = item.get("pwm")
+            if isinstance(pwm, (int, float)):
+                rendered.append(f"{label}: {pwm:.0f} µs")
+        if rendered:
+            self.thruster_status.setText("Thruster PWM  |  " + "  |  ".join(rendered))
+
     def __SetupUI(self):
         grid_layout = QGridLayout()
 
@@ -676,6 +750,7 @@ class MainWindow(QMainWindow):
 
         grid_layout.addWidget(self.screenshot_btn, 4, 0)
         grid_layout.addWidget(self.stopwatch_widget, 4, 1, 1, 2)
+        grid_layout.addWidget(self.thruster_status, 5, 0, 1, 3)
 
         self.widget = QWidget()
         self.widget.setLayout(grid_layout)
@@ -693,6 +768,12 @@ class MainWindow(QMainWindow):
 
     def ShowCamera(self, cam_number, frame):
         self.cameras[f"Camera_{cam_number}"].setPixmap(QPixmap.fromImage(frame))
+
+    def closeEvent(self, event):
+        if hasattr(self, "thruster_listener"):
+            self.thruster_listener.stop()
+            self.thruster_listener.wait(1000)
+        super().closeEvent(event)
 
 
 # --- Run ---

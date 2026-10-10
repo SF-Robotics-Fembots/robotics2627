@@ -4,6 +4,9 @@ import socket
 import time
 
 
+TELEMETRY_PORT = 7071
+
+
 def main(ip_server, shield):
 
 	#setting up the median of the 'off' values for the thrusters
@@ -137,6 +140,8 @@ def main(ip_server, shield):
 
 	joystick_stream = clientSocket.makefile("rb")
 	direction_stream = clientSocket1.makefile("rb")
+	telemetry_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	telemetry_address = (ip_server, TELEMETRY_PORT)
 	print("connected")
 	prevX = 0
 	prevY = 0
@@ -389,10 +394,25 @@ def main(ip_server, shield):
 			for thruster, val in zip(allThrusters, compensatedPowerVals):
 				thruster.duty_cycle = int(val / 10000 * 65536)
 
+			# Send the commanded PWM pulse widths to the topside GUI. Keep this
+			# list-based format so adding thrusters only requires extending labels
+			# and values in this controller.
+			labels = [f"T{i + 1}" for i in range(len(compensatedPowerVals))]
+			telemetry = {
+				"thrusters": [
+					{"label": label, "pwm": int(round(val))}
+					for label, val in zip(labels, compensatedPowerVals)
+				]
+			}
+			try:
+				telemetry_socket.sendto(json.dumps(telemetry).encode("utf-8"), telemetry_address)
+			except OSError:
+				# Telemetry is for display only; a network issue must not stop control.
+				pass
+
 			#print(*allPowerVals)
 
 			# Print PWM values in a single row with labels
-			labels = ["T1", "T2", "T3", "T4", "T5", "T6"]
 			print(f"Time:{time.time()} | " + " | ".join(f"{label}:{val}" for label, val in zip(labels, compensatedPowerVals)))
 			
 			# Print actual ESC values (duty cycle)
@@ -407,6 +427,7 @@ def main(ip_server, shield):
 			direction_stream.close()
 			clientSocket.close()
 			clientSocket1.close()
+			telemetry_socket.close()
 			if isinstance(exc, ConnectionError):
 				break
 			raise
