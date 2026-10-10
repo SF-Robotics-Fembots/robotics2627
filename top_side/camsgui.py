@@ -7,12 +7,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QPixmap, QImage, QFont, QPalette
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
-import sys
-import time
-import os
-import json
-import datetime
-import queue
+import sys, time, os, json, datetime, queue
 import numpy as np
 
 # Target display rate per camera. We always read frames to stay at the live
@@ -28,7 +23,7 @@ FALLBACK_SHOT_DIR = os.path.join(os.path.expanduser("~"), "camsgui_screenshots")
 ROTATION_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camera_rotations.json")
 SCREENSHOT_CAMERA_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshot_default_camera.json")
 
-
+#need to change this to the correct timezone for seattle, washington 
 def _newfoundland_is_dst(utc_dt):
     # Newfoundland DST: 2nd Sunday of March 02:00 local -> 1st Sunday of Nov 02:00 local.
     year = utc_dt.year
