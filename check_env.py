@@ -1,5 +1,4 @@
 import importlib
-import platform
 import sys
 
 # Define expected environment baselines
@@ -7,13 +6,14 @@ EXPECTED_PYTHON_MAJOR = 3
 EXPECTED_PYTHON_MINOR = 14
 EXPECTED_UBUNTU_VERSION = "26.04"
 
+# Corrected Python module import namespaces
 CRITICAL_LIBRARIES = [
-    "Adafruit_Blinka",
-    "adafruit_circuitpython_servokit",
-    "pygame_ce",
-    "hid",
-    "pyserial",
-    "rpi_lgpio",
+    "board",  # Provided by Adafruit-Blinka
+    "adafruit_servokit",  # Provided by adafruit-circuitpython-servokit
+    "pygame",  # Provided by pygame-ce
+    "hid",  # Provided by hid
+    "serial",  # Provided by pyserial
+    "RPi.GPIO",  # Provided by rpi-lgpio
 ]
 
 
@@ -25,7 +25,7 @@ def check_system():
   try:
     with open("/etc/os-release", "r") as f:
       os_info = f.read()
-    if f"VERSION_ID=\"{EXPECTED_UBUNTU_VERSION}\"" in os_info:
+    if f'VERSION_ID="{EXPECTED_UBUNTU_VERSION}"' in os_info:
       print(f" [PASS] Ubuntu Version matches: {EXPECTED_UBUNTU_VERSION}")
     else:
       print(
