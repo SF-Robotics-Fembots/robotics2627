@@ -1,5 +1,0 @@
-pygame
-hid
-hidapi
-pynput
-keyboard
