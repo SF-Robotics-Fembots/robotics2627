@@ -17,6 +17,8 @@ def main(ip_server, shield):
 	neutral_pwm = 1500
 	max_horizontal_thrust = 50
 	max_vertical_thrust = 50
+	# This caps aggregate PWM distance from neutral, not measured electrical power.
+	max_total_pwm_delta_us = 1200
 	pitch_scale = 85
 	roll_scale = 85
 	# CHECK: Set these signs for the actual T5-T8 positions and push directions.
@@ -397,25 +399,6 @@ def main(ip_server, shield):
 
 
 
-			# static power limiting
-			finalTotal = sum(
-				abs(value - horiz_off_value) for value in powerThrusterVals
-			) + sum(
-				abs(value - vert_off_value) for value in powerVertThrusterVals
-			)
-			print(f"Final Total: {finalTotal}")
-			if finalTotal > 1200:
-				scale = 1200 / finalTotal
-				print(f"Power Multiplier: {scale}")
-				powerThrusterVals = [
-					horiz_off_value + (value - horiz_off_value) * scale
-					for value in powerThrusterVals
-				]
-				powerVertThrusterVals = [
-					vert_off_value + (value - vert_off_value) * scale
-					for value in powerVertThrusterVals
-				]
-
 			#print("third print")
 			#debug_l2 = 1
 			
@@ -432,6 +415,26 @@ def main(ip_server, shield):
 				clamp_pwm(val, thruster_pwm_limits[index])
 				for index, val in enumerate(compensatedPowerVals)
 			]
+			neutralValues = (
+				[horiz_off_value] * len(powerThrusterVals)
+				+ [vert_off_value] * len(powerVertThrusterVals)
+			)
+			total_pwm_delta_us = sum(
+				abs(value - neutral)
+				for value, neutral in zip(compensatedPowerVals, neutralValues)
+			)
+			print(f"Aggregate PWM delta: {total_pwm_delta_us:.1f} us")
+			if total_pwm_delta_us > max_total_pwm_delta_us:
+				scale = max_total_pwm_delta_us / total_pwm_delta_us
+				print(f"Aggregate PWM scale: {scale:.3f}")
+				compensatedPowerVals = [
+					neutral + (value - neutral) * scale
+					for value, neutral in zip(compensatedPowerVals, neutralValues)
+				]
+				compensatedPowerVals = [
+					clamp_pwm(val, thruster_pwm_limits[index])
+					for index, val in enumerate(compensatedPowerVals)
+				]
 
 			# Combine corresponding thruster objects
 			# Apply compensated PWM to each thruster and print values in a single row
