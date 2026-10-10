@@ -18,6 +18,10 @@ def main(ip_server, stop_event):
 
         joystick = pygame.joystick.Joystick(0)
         joystick.init()
+        if joystick.get_numaxes() < 4:
+            raise RuntimeError("Joystick must provide at least four axes")
+        if joystick.get_numhats() < 1:
+            raise RuntimeError("Joystick must provide a hat for pitch and roll")
 
         server_socket.bind((ip_server, 9090))
         server_socket.listen(1)
@@ -52,11 +56,17 @@ def main(ip_server, stop_event):
             elif joystick.get_button(2):
                 mode = 0.5
 
+            # CHECK: Confirm these axis indexes and signs on this joystick.
+            # The Extreme 3D Pro's throttle may not center at zero.
+            hat_x, hat_y = joystick.get_hat(0)
             speeds = {
                 "x_speed": joystick.get_axis(0) * mode,
                 "y_speed": joystick.get_axis(1) * mode,
                 "r_speed": joystick.get_axis(2) * mode,
                 "v_speed": joystick.get_axis(3) * mode,
+                # CHECK: The hat is digital; verify pitch/roll signs match the vehicle.
+                "pitch_speed": hat_y * mode,
+                "roll_speed": hat_x * mode,
             }
 
             if mode == 0.5:

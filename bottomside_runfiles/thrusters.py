@@ -14,6 +14,15 @@ def main(ip_server, shield):
 	neutral_pwm = 1500
 	max_horizontal_thrust = 50
 	max_vertical_thrust = 50
+	pitch_scale = 85
+	roll_scale = 85
+	# CHECK: Set these signs for the actual T5-T8 positions and push directions.
+	vertical_mix = [
+		(1, 1),    # T5: pitch sign, roll sign
+		(1, -1),   # T6
+		(-1, 1),   # T7
+		(-1, -1),  # T8
+	]
 	thruster_startup_pwm = [
 		{"positive": 1510, "negative": 1460},  # T1
 		{"positive": 1510, "negative": 1465},  # T2
@@ -21,6 +30,8 @@ def main(ip_server, shield):
 		{"positive": 1560, "negative": 1455},  # T4
 		{"positive": 1560, "negative": 1445},  # T5
 		{"positive": 1560, "negative": 1450},  # T6
+		{"positive": 1500, "negative": 1500},  # T7: CHECK/calibrate startup compensation
+		{"positive": 1500, "negative": 1500},  # T8: CHECK/calibrate startup compensation
 	]
 	thruster_pwm_limits = [
 		None,          # T1
@@ -29,6 +40,8 @@ def main(ip_server, shield):
 		None,          # T4
 		(1165, 1825),  # T5
 		(1165, 1825),  # T6
+		(1165, 1825),  # T7: CHECK allowed PWM range for this ESC/thruster
+		(1165, 1825),  # T8: CHECK allowed PWM range for this ESC/thruster
 	]
 	dynamic_change = 999
 
@@ -47,13 +60,17 @@ def main(ip_server, shield):
 	thrusterChannel4 = shield.channels[11] #J10
 	thrusterChannel5 = shield.channels[9] #J19
 	thrusterChannel6 = shield.channels[14] #J2
+	# CHECK HARDWARE: Set the PCA9685 channel numbers actually wired to T7 and T8.
+	# Keep unset rather than risking output to the wrong ESC channel.
+	t7_pca_channel = None
+	t8_pca_channel = None
 	allThrusters = [
 		thrusterChannel1,
 		thrusterChannel2,
 		thrusterChannel3,
 		thrusterChannel4,
 		thrusterChannel5,
-		thrusterChannel6
+		thrusterChannel6,
 	]
 
 	def set_neutral():
@@ -61,6 +78,14 @@ def main(ip_server, shield):
 		for channel in allThrusters:
 			channel.duty_cycle = neutral_duty
 
+	set_neutral()
+	if t7_pca_channel is None or t8_pca_channel is None:
+		raise RuntimeError(
+			"Set the verified PCA9685 channels for T7 and T8 before operating"
+		)
+	thrusterChannel7 = shield.channels[t7_pca_channel]
+	thrusterChannel8 = shield.channels[t8_pca_channel]
+	allThrusters.extend((thrusterChannel7, thrusterChannel8))
 	set_neutral()
 
 	def set_throttle(channel, throttle_in, delay=0):
@@ -158,7 +183,14 @@ def main(ip_server, shield):
 			if not isinstance(thrusterMovements, dict):
 				raise ValueError("Joystick message must be a JSON object")
 
-			speed_keys = ("x_speed", "y_speed", "r_speed", "v_speed")
+			speed_keys = (
+				"x_speed",
+				"y_speed",
+				"r_speed",
+				"v_speed",
+				"pitch_speed",
+				"roll_speed",
+			)
 			speeds = [thrusterMovements.get(key) for key in speed_keys]
 			if any(
 				isinstance(value, bool)
@@ -198,6 +230,8 @@ def main(ip_server, shield):
 			#v_speed = v_speed[1:]
 			v_speed = thrusterMovements['v_speed']
 			v_speed = float(v_speed)
+			pitch_speed = thrusterMovements["pitch_speed"]
+			roll_speed = thrusterMovements["roll_speed"]
 			
 
 			#lines 157-190: translates first measured joystick values, which comes as a float, from top side
@@ -237,7 +271,9 @@ def main(ip_server, shield):
 			x_speed = int((x_speed)*50)
 			y_speed = int((y_speed)*50)
 			r_speed = int((r_speed)*25)
-			v_speed = int((v_speed)*85)
+			v_speed = int(v_speed * 85)
+			pitch_speed = int(pitch_speed * pitch_scale)
+			roll_speed = int(roll_speed * roll_scale)
 
 			#print("R Speed: " + str(r_speed))
 			#rotation compensation :(
@@ -275,32 +311,40 @@ def main(ip_server, shield):
 			yDirArray = [1*direction, -1*direction, 1*direction, -1*direction]
 			xDirArray = [-1*direction, -1*direction, 1*direction, 1*direction]
 			rDirArray = [-1, 1, 1, -1]
-			vDirArray = [1, 1]
+			# CHECK HARDWARE: Verify each vertical ESC/motor direction.
+			vDirArray = [1, 1, 1, 1]
 
 			# array for each horizontal thruster value
 			oldThrusterVals = [0, 0, 0, 0]
 			# array for each vertical thruster value
-			oldVertThrusterVals = [0, 0]
+			oldVertThrusterVals = [0, 0, 0, 0]
 
 			# loop to collect value for each thruster using horizontal calculation function
 			for tNum in range(0,4):
 				#goes through code four times
 				oldThrusterVals[tNum] = int((calcHorizontal(x_speed, tNum, xDirArray) + calcHorizontal(y_speed, tNum, yDirArray) + calcHorizontal(r_speed, tNum, rDirArray)))
 			# loop to collect value for each thruster using vertical calculation function
-			for vNum in range(0,2):
-				#goes through code two times
-				oldVertThrusterVals[vNum] = int((calcVertical(v_speed, vNum, vDirArray)))
+			for vNum, (pitch_sign, roll_sign) in enumerate(vertical_mix):
+				combined_vertical = (
+					v_speed
+					+ pitch_speed * pitch_sign
+					+ roll_speed * roll_sign
+				)
+				oldVertThrusterVals[vNum] = int(
+					calcVertical(combined_vertical, vNum, vDirArray)
+				)
 
 			clockArray = [1, -1, 1, 1]    #1 for CW, -1 for CCW
-			clockVertArray = [1, 1] 
+			# CHECK HARDWARE: Verify/reverse these signs after testing each vertical thruster.
+			clockVertArray = [1, 1, 1, 1]
 
 			thrusterVals = [0, 0, 0, 0]
-			vertThrusterVals = [0, 0]
+			vertThrusterVals = [0, 0, 0, 0]
 
 			for tNum in range(0, 4):
 				thrusterVals[tNum] = int(oldThrusterVals[tNum] * clockArray[tNum])
 
-			for vNum in range(0, 2):
+			for vNum in range(0, 4):
 				vertThrusterVals[vNum] = int(oldVertThrusterVals[vNum] * clockVertArray[vNum])
 
 		# original print
@@ -315,17 +359,17 @@ def main(ip_server, shield):
 					#lines 284-291: finds the maximum value of all throttle values, then limits them if needed
 
 			max_vert_thruster = 0
-			for vertThrusters in range(0, 2):
+			for vertThrusters in range(0, 4):
 				max_vert_thruster = max(max_vert_thruster, abs(vertThrusterVals[vertThrusters]))
 
 			if (max_vert_thruster != 0) and (max_vert_thruster >= max_vertical_thrust):
-				for vertThrusters in range(0, 2):
+				for vertThrusters in range(0, 4):
 					vertThrusterVals[vertThrusters] = int(vertThrusterVals[vertThrusters] * (max_vertical_thrust / max_vert_thruster))
 
 
 			# new lists for the adjusted values for our power functions
 			powerThrusterVals = [0, 0, 0, 0]
-			powerVertThrusterVals = [0, 0]
+			powerVertThrusterVals = [0, 0, 0, 0]
 
 			# both for loops adjust the range of the thrusters to 1000-2000
 			for thrusters in range(0, 4):
@@ -336,7 +380,7 @@ def main(ip_server, shield):
 					powerThrusterVals[thrusters] = horiz_off_value + ((abs(thrusterVals[thrusters])/thrusterVals[thrusters]) * horiz_thrust_offset) + (thrusterVals[thrusters] * 7.0)
 			#was 25 and 4.64
 			#using 1489 because 1489 = median of thruster calibration (all thrusters stop at 1489)
-			for vertThrusters in range(0, 2):
+			for vertThrusters in range(0, 4):
 				if debug_l2: print(vertThrusterVals[vertThrusters])
 				if (vertThrusterVals[vertThrusters] == 0):
 					powerVertThrusterVals[vertThrusters] = vert_off_value
@@ -392,7 +436,7 @@ def main(ip_server, shield):
 			#print(*allPowerVals)
 
 			# Print PWM values in a single row with labels
-			labels = ["T1", "T2", "T3", "T4", "T5", "T6"]
+			labels = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"]
 			print(f"Time:{time.time()} | " + " | ".join(f"{label}:{val}" for label, val in zip(labels, compensatedPowerVals)))
 			
 			# Print actual ESC values (duty cycle)
