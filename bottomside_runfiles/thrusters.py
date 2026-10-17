@@ -7,6 +7,47 @@ import time
 TELEMETRY_PORT = 7071
 
 
+def set_neutral(thruster_channels, neutral_pwm):
+	neutral_duty = int(neutral_pwm / 10000 * 65536)
+	for channel in thruster_channels:
+		channel.duty_cycle = neutral_duty
+
+
+def set_throttle(channel, throttle_in, delay=0):
+	throttle_pwm = int(throttle_in / 10000 * 65536)
+	channel.duty_cycle = throttle_pwm
+	time.sleep(0)
+
+
+def apply_startup_compensation(pwm, thresholds, neutral_pwm):
+	if pwm == neutral_pwm:
+		return neutral_pwm
+	if pwm > neutral_pwm:
+		return pwm + (thresholds["positive"] - neutral_pwm)
+	return pwm - (neutral_pwm - thresholds["negative"])
+
+
+def clamp_pwm(pwm, limits):
+	if limits is None:
+		return pwm
+	min_pwm, max_pwm = limits
+	return max(min_pwm, min(max_pwm, pwm))
+
+
+def calcHorizontal(joyValue, thrusterNum, direction):
+	if -5 <= joyValue <= 5:
+		return 0
+	joyValue = joyValue - ((abs(joyValue) / joyValue) * 5)
+	return joyValue * direction[thrusterNum]
+
+
+def calcVertical(joyValue, thrusterNum, direction):
+	if -15 <= joyValue <= 15:
+		return 0
+	joyValue = joyValue - ((abs(joyValue) / joyValue) * 10)
+	return joyValue * direction[thrusterNum]
+
+
 def main(ip_server, shield):
 
 	#setting up the median of the 'off' values for the thrusters
@@ -59,96 +100,15 @@ def main(ip_server, shield):
 	rot_comp = 0#was -0.08
 	slide_comp =0 #0.19
 
-	thrusterChannel1 = shield.channels[8] #J16
-	thrusterChannel2 = shield.channels[12] #J9
-	thrusterChannel3 = shield.channels[13] #J8
-	thrusterChannel4 = shield.channels[11] #J10
-	thrusterChannel5 = shield.channels[9] #J19
-	thrusterChannel6 = shield.channels[14] #J2
 	# CHECK HARDWARE: Set the PCA9685 channel numbers actually wired to T7 and T8.
 	# Keep unset rather than risking output to the wrong ESC channel.
-	t7_pca_channel = None
-	t8_pca_channel = None
-	allThrusters = [
-		thrusterChannel1,
-		thrusterChannel2,
-		thrusterChannel3,
-		thrusterChannel4,
-		thrusterChannel5,
-		thrusterChannel6,
-	]
 
-	def set_neutral():
-		neutral_duty = int(neutral_pwm / 10000 * 65536)
-		for channel in allThrusters:
-			channel.duty_cycle = neutral_duty
+	shield_channels = [8, 12, 13, 11, 9, 14, 1, 2]
+	thruster_channels = []
+	for shield_channel in shield_channels[:6]:
+		thruster_channels.append(shield.channels[shield_channel])
 
-	set_neutral()
-	if t7_pca_channel is None or t8_pca_channel is None:
-		raise RuntimeError(
-			"Set the verified PCA9685 channels for T7 and T8 before operating"
-		)
-	thrusterChannel7 = shield.channels[t7_pca_channel]
-	thrusterChannel8 = shield.channels[t8_pca_channel]
-	allThrusters.extend((thrusterChannel7, thrusterChannel8))
-	set_neutral()
-
-	def set_throttle(channel, throttle_in, delay=0):
-		throttlePW = int(throttle_in / 10000 * 65536)
-		channel.duty_cycle = throttlePW
-		time.sleep(0)
-
-	def apply_startup_compensation(pwm, thresholds):
-		if pwm == neutral_pwm:
-			return neutral_pwm
-		if pwm > neutral_pwm:
-			return pwm + (thresholds["positive"] - neutral_pwm)
-		return pwm - (neutral_pwm - thresholds["negative"])
-
-	def clamp_pwm(pwm, limits):
-		if limits is None:
-			return pwm
-		min_pwm, max_pwm = limits
-		return max(min_pwm, min(max_pwm, pwm))
-
-	# def test_sequence(ip_server):
-	# 	channels = [thrusterChannel1, thrusterChannel2, thrusterChannel3, thrusterChannel4, thrusterChannel5, thrusterChannel6]
-	# 	throttle_sequence = [
-	# 		2200,
-	# 		1500,
-	# 		2200,
-	# 		1500,
-	# 		2200,
-	# 		1500,
-	# 		2200,
-	# 		1500,
-	# 		2200,
-	# 		1500,
-	# 		2200,
-	# 		1500,
-	# 	]
-
-	# 	for channel, throttle in zip(channels, throttle_sequence):
-	# 		set_throttle(channel, throttle, delay=0)
-
-
-	#horizontal thrusters calculations
-	def calcHorizontal(joyValue, thrusterNum, direction):
-		if (-5 <= joyValue <= 5):         # can adjust to create deadzone
-			return 0
-		else:
-			joyValue = joyValue - ((abs(joyValue)/joyValue) * 5)
-			return joyValue * direction[thrusterNum]
-
-
-	# vertical thrusters calculations
-	def calcVertical(joyValue, thrusterNum, direction):
-		if (-15 <= joyValue <= 15):
-			return 0
-		else:
-			joyValue = joyValue - ((abs(joyValue)/joyValue) * 10) # was 5
-			return joyValue * direction[thrusterNum]
-			
+	set_neutral(thruster_channels, neutral_pwm)
 	print("about to connect")
 
 	clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -162,7 +122,7 @@ def main(ip_server, shield):
 	except OSError:
 		clientSocket.close()
 		clientSocket1.close()
-		set_neutral()
+		set_neutral(thruster_channels, neutral_pwm)
 		raise
 
 	joystick_stream = clientSocket.makefile("rb")
@@ -408,7 +368,9 @@ def main(ip_server, shield):
 			#Combine horizontal and vertical thruster values
 			allPowerVals = powerThrusterVals + powerVertThrusterVals
 			compensatedPowerVals = [
-				apply_startup_compensation(val, thruster_startup_pwm[index])
+				apply_startup_compensation(
+					val, thruster_startup_pwm[index], neutral_pwm
+				)
 				for index, val in enumerate(allPowerVals)
 			]
 			compensatedPowerVals = [
@@ -438,7 +400,7 @@ def main(ip_server, shield):
 
 			# Combine corresponding thruster objects
 			# Apply compensated PWM to each thruster and print values in a single row
-			for thruster, val in zip(allThrusters, compensatedPowerVals):
+			for thruster, val in zip(thruster_channels, compensatedPowerVals):
 				thruster.duty_cycle = int(val / 10000 * 65536)
 
 			# Send the commanded PWM pulse widths to the topside GUI. Keep this
@@ -469,7 +431,7 @@ def main(ip_server, shield):
 
 
 		except Exception as exc:
-			set_neutral()
+			set_neutral(thruster_channels, neutral_pwm)
 			print(f"Thruster input/connection error: {exc}")
 			joystick_stream.close()
 			direction_stream.close()
