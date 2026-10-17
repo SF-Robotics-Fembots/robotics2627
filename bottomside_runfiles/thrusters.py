@@ -107,6 +107,7 @@ def main(ip_server, shield):
 	#debug! make more laters
 	debug_l2 = 0
 
+	#add to config/control panel
 	#rotation compensation
 	rot_comp = 0#was -0.08
 	slide_comp =0 #0.19
