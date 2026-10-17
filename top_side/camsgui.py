@@ -1,10 +1,10 @@
 #i changed camera switching for screenshot
-import cv2 #pip install opencv-python
+import cv2 #pip install opencv-python, used for image processing and camera capture
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
     QGridLayout, QScrollArea, QSizePolicy,
     QPushButton, QHBoxLayout
-) #pip install PyQt5
+) #pip install PyQt5, used for GUI
 from PyQt5.QtGui import QPixmap, QImage, QFont, QPalette
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 import sys, time, os, json, datetime, queue
@@ -787,3 +787,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
