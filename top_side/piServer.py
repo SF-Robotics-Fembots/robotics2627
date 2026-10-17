@@ -6,11 +6,20 @@ import pygame
 
 
 def main(ip_server, stop_event):
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket = None
     client_socket = None
-    server_socket.settimeout(0.5)
 
     try:
+        try:
+            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_socket.settimeout(0.5)
+            server_socket.bind((ip_server, 7070))
+            server_socket.listen(1)
+        except OSError as exc:
+            raise OSError(
+                f"Could not set up direction socket on {ip_server}:7070: {exc}"
+            ) from exc
+
         pygame.joystick.init()
         if pygame.joystick.get_count() == 0:
             raise RuntimeError("No joystick detected")
@@ -18,8 +27,6 @@ def main(ip_server, stop_event):
         joystick = pygame.joystick.Joystick(0)
         joystick.init()
 
-        server_socket.bind((ip_server, 7070))
-        server_socket.listen(1)
         print("Direction socket listening")
 
         while not stop_event.is_set():
@@ -46,7 +53,8 @@ def main(ip_server, stop_event):
     finally:
         if client_socket is not None:
             client_socket.close()
-        server_socket.close()
+        if server_socket is not None:
+            server_socket.close()
 
 
 if __name__ == "__main__":
