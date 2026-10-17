@@ -1,22 +1,24 @@
-import json
-import math
-import socket
-import time
+import json #decodes joystick messages
+import math #has math functions so you can do more complex calculations
+import socket #connects topside and bottomside/ client and server
+import time #delays code for a certain amount of time
 
-
+#for the gui so cynthia can get bottomside pwm values
 TELEMETRY_PORT = 7071
 
+#set_neutral overall sets every thruster channel to the same neutral PWM signal
+def set_neutral(thruster_channels, neutral_pwm): # defines the function; thruster_channels is a collection of PWN channels
+	neutral_duty = int(neutral_pwm / 10000 * 65536) # sets the PWM frequency to about 100 Hz, 
+	#giving a 10000 microsecond period. so a neutral value of 1500 becomes a duty-cycle value of about 9830
+	for channel in thruster_channels: #for loop that goes through each channel in the thruster_channels collection
+		channel.duty_cycle = neutral_duty # sets the duty cycle for each thruster channel to the neutral value of 1500
+		#this does not mean it cuts power because neutral might not be exactly 1500 on the actual thruster
 
-def set_neutral(thruster_channels, neutral_pwm):
-	neutral_duty = int(neutral_pwm / 10000 * 65536)
-	for channel in thruster_channels:
-		channel.duty_cycle = neutral_duty
-
-
-def set_throttle(channel, throttle_in, delay=0):
-	throttle_pwm = int(throttle_in / 10000 * 65536)
-	channel.duty_cycle = throttle_pwm
-	time.sleep(0)
+# converts a pulse-width value into the PWM format expected by the hardware then applies to one channel
+def set_throttle(channel, throttle_in, delay=0): #defines function; channel is a single PWM channel, throttle_in is the desired pulse width in microseconds, delay is optional - not used in the function
+	throttle_pwm = int(throttle_in / 10000 * 65536) # converts the pulse width in microseconds to the PWM duty cycle format expected by the hardware. The formula scales the input value (throttle_in) from a range of 0-10000 microseconds to a range of 0-65536, which is the resolution of the PWM controller.
+	channel.duty_cycle = throttle_pwm # applies duty cycle value to the specified channel, effectively setting the throttle for that thruster.
+	time.sleep(0) #'delay' but not actually delaying anything since its 0 seconds; actually don't know why this is necessary
 
 
 def apply_startup_compensation(pwm, thresholds, neutral_pwm):
@@ -55,7 +57,7 @@ def main(ip_server, shield):
 	horiz_thrust_offset = 0
 	vert_off_value = 1500
 	vert_thrust_offset = 0
-	neutral_pwm = 1500
+	neutral_pwm = 1500 #sets neutral to 1500
 	max_horizontal_thrust = 50
 	max_vertical_thrust = 50
 	# This caps aggregate PWM distance from neutral, not measured electrical power.
@@ -69,6 +71,8 @@ def main(ip_server, shield):
 		(-1, 1),   # T7
 		(-1, -1),  # T8
 	]
+
+	#add this to control/config panel
 	thruster_startup_pwm = [
 		{"positive": 1510, "negative": 1460},  # T1
 		{"positive": 1510, "negative": 1465},  # T2
@@ -79,6 +83,8 @@ def main(ip_server, shield):
 		{"positive": 1500, "negative": 1500},  # T7: CHECK/calibrate startup compensation
 		{"positive": 1500, "negative": 1500},  # T8: CHECK/calibrate startup compensation
 	]
+
+	#add this to control/config panel
 	thruster_pwm_limits = [
 		None,          # T1
 		None,          # T2
