@@ -20,22 +20,27 @@ def set_throttle(channel, throttle_in, delay=0): #defines function; channel is a
 	channel.duty_cycle = throttle_pwm # applies duty cycle value to the specified channel, effectively setting the throttle for that thruster.
 	time.sleep(0) #'delay' but not actually delaying anything since its 0 seconds; actually don't know why this is necessary
 
-
-def apply_startup_compensation(pwm, thresholds, neutral_pwm):
+# ajusts the PWM value to account for startup compensation thresholds, ensuring that the thruster starts moving as expected. 
+# It takes into account the neutral PWM value and applies the appropriate compensation based on whether the input PWM is above or below neutral.
+def apply_startup_compensation(pwm, thresholds, neutral_pwm): # pwm - comamand to adjust, thresholds - dictionary with positive and negative compensation values, neutral_pwm - the neutral PWM value for the thruster
 	if pwm == neutral_pwm:
-		return neutral_pwm
-	if pwm > neutral_pwm:
+		return neutral_pwm #if the command is exactly neutral, return the neutral value without any compensation
+	if pwm > neutral_pwm: #if its above neutral, apply positive compensation
 		return pwm + (thresholds["positive"] - neutral_pwm)
-	return pwm - (neutral_pwm - thresholds["negative"])
+	return pwm - (neutral_pwm - thresholds["negative"]) #same thing for negative but in opposite direction
 
-
-def clamp_pwm(pwm, limits):
+#keeps a PWM command within an optional range of limits. 
+# If no limits are provided, the PWM command is returned unchanged. 
+# This function ensures that the PWM value does not exceed specified minimum and maximum bounds, 
+# which can be important for protecting hardware or ensuring safe operation.
+def clamp_pwm(pwm, limits): #pwm - value to check, limits - either None or a tuple containing (min_pwm, max_pwm)
 	if limits is None:
-		return pwm
-	min_pwm, max_pwm = limits
-	return max(min_pwm, min(max_pwm, pwm))
+		return pwm #if no limits are provided, return the original PWM value
+	min_pwm, max_pwm = limits #unpack the minimum and maximum PWM values from the limits tuple
+	return max(min_pwm, min(max_pwm, pwm)) # ensures that the PWM value is not less than min_pwm and not greater than max_pwm.
+	# bounds the commanded value; doesn't confirm the limoits are appropriate for the connected thruster of ESC
 
-
+# converts one joystick input value into a PWM command for a horizontal thruster, taking into account a deadzone and the direction of the thruster.
 def calcHorizontal(joyValue, thrusterNum, direction):
 	if -5 <= joyValue <= 5:
 		return 0
