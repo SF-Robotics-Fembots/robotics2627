@@ -67,14 +67,10 @@ def main(ip_server, shield):
 	max_vertical_thrust = 50
 	# This caps aggregate PWM distance from neutral, not measured electrical power.
 	max_total_pwm_delta_us = 1200
-	pitch_scale = 85
 	roll_scale = 85
 	# Assumes T5/T6 are mounted left/right: together they provide heave,
-	# and differential thrust provides roll. This pair cannot provide pitch.
-	vertical_mix = [
-		(0, 1),   # T5: pitch sign, roll sign
-		(0, -1),  # T6
-	]
+	# and differential thrust provides roll.
+	vertical_roll_signs = [1, -1]
 
 	#add this to control/config panel
 	thruster_startup_pwm = [
@@ -157,7 +153,6 @@ def main(ip_server, shield):
 				"y_speed",
 				"r_speed",
 				"v_speed",
-				"pitch_speed",
 				"roll_speed",
 			)
 			speeds = [thrusterMovements.get(key) for key in speed_keys]
@@ -199,7 +194,6 @@ def main(ip_server, shield):
 			#v_speed = v_speed[1:]
 			v_speed = thrusterMovements['v_speed']
 			v_speed = float(v_speed)
-			pitch_speed = thrusterMovements["pitch_speed"]
 			roll_speed = thrusterMovements["roll_speed"]
 			
 
@@ -241,7 +235,6 @@ def main(ip_server, shield):
 			y_speed = int((y_speed)*50)
 			r_speed = int((r_speed)*25)
 			v_speed = int(v_speed * 85)
-			pitch_speed = int(pitch_speed * pitch_scale)
 			roll_speed = int(roll_speed * roll_scale)
 
 			#print("R Speed: " + str(r_speed))
@@ -283,34 +276,30 @@ def main(ip_server, shield):
 			xDirArray = [-1*direction, -1*direction, 1*direction, 1*direction]
 			rDirArray = [-1, 1, 1, -1]
 			# CHECK HARDWARE: Verify each vertical ESC/motor direction.
-			vDirArray = [1] * len(vertical_mix)
+			vDirArray = [1] * len(vertical_roll_signs)
 
 			# array for each horizontal thruster value
 			oldThrusterVals = [0, 0, 0, 0]
 			# array for each vertical thruster value
-			oldVertThrusterVals = [0] * len(vertical_mix)
+			oldVertThrusterVals = [0] * len(vertical_roll_signs)
 
 			# loop to collect value for each thruster using horizontal calculation function
 			for tNum in range(0,4):
 				#goes through code four times
 				oldThrusterVals[tNum] = int((calcHorizontal(x_speed, tNum, xDirArray) + calcHorizontal(y_speed, tNum, yDirArray) + calcHorizontal(r_speed, tNum, rDirArray)))
 			# loop to collect value for each thruster using vertical calculation function
-			for vNum, (pitch_sign, roll_sign) in enumerate(vertical_mix):
-				combined_vertical = (
-					v_speed
-					+ pitch_speed * pitch_sign
-					+ roll_speed * roll_sign
-				)
+			for vNum, roll_sign in enumerate(vertical_roll_signs):
+				combined_vertical = v_speed + roll_speed * roll_sign
 				oldVertThrusterVals[vNum] = int(
 					calcVertical(combined_vertical, vNum, vDirArray)
 				)
 
 			clockArray = [1, -1, 1, 1]    #1 for CW, -1 for CCW
 			# CHECK HARDWARE: Verify/reverse these signs after testing each vertical thruster.
-			clockVertArray = [1] * len(vertical_mix)
+			clockVertArray = [1] * len(vertical_roll_signs)
 
 			thrusterVals = [0, 0, 0, 0]
-			vertThrusterVals = [0] * len(vertical_mix)
+			vertThrusterVals = [0] * len(vertical_roll_signs)
 
 			for tNum in range(0, 4):
 				thrusterVals[tNum] = int(oldThrusterVals[tNum] * clockArray[tNum])
@@ -340,7 +329,7 @@ def main(ip_server, shield):
 
 			# new lists for the adjusted values for our power functions
 			powerThrusterVals = [0, 0, 0, 0]
-			powerVertThrusterVals = [0] * len(vertical_mix)
+			powerVertThrusterVals = [0] * len(vertical_roll_signs)
 
 			# both for loops adjust the range of the thrusters to 1000-2000
 			for thrusters in range(0, 4):
@@ -435,7 +424,7 @@ def main(ip_server, shield):
 
 
 		except Exception as exc:
-			set_neutral(thruster_channels, neutral_pwm)
+		set_neutral(thruster_channels, neutral_pwm)
 			print(f"Thruster input/connection error: {exc}")
 			joystick_stream.close()
 			direction_stream.close()
