@@ -249,18 +249,20 @@ def main(ip_server, shield):
 			r_speed = int(r_speed + rot_comp * y_speed)
 			r_speed = int(r_speed + slide_comp * x_speed)
 
-			
-			direction_message = direction_stream.readline()
-			if not direction_message:
+		#reads the pilot inversion message from topside and sets the direction variable accordingly. 
+		#This allows the thruster control logic to adjust for pilot inversion, ensuring that the thrusters respond correctly to joystick inputs regardless of the pilot's orientation or preferences.	
+			direction_message = direction_stream.readline() # reads a line from the direction_stream, which is expected to contain a message indicating the desired direction for pilot inversion. 
+			#This message is used to determine how the thruster control logic should interpret joystick inputs.
+			if not direction_message: #checks if the direction_message is empty or None, which would indicate that the connection to the direction client has been lost or closed.
 				raise ConnectionError("Direction client disconnected")
-			directionRecieved = direction_message.decode("ascii").strip()
-			if (directionRecieved == "a"):
+			directionRecieved = direction_message.decode("ascii").strip() # decodes the received byte message into a string using ASCII encoding and removes any leading or trailing whitespace. This prepares the message for further processing to determine the direction setting.
+			if (directionRecieved == "a"): #if the received message is "a", it sets the direction variable to 1, indicating normal operation without inversion.
 				direction = 1
-			elif (directionRecieved == "b"):
+			elif (directionRecieved == "b"): #if the received message is "b", it sets the direction variable to -1, indicating that pilot inversion is active and the thruster control logic should invert the joystick inputs accordingly.
 				direction = -1
-			elif directionRecieved == "c":
+			elif directionRecieved == "c": #if the received message is "c", it sets the direction variable to 0, indicating that the thrusters should be disabled or set to a neutral state, effectively stopping any movement.
 				direction = direction
-			else:
+			else: #if the received message does not match any of the expected values ("a", "b", or "c"), it raises a ValueError with a message indicating that the direction message is invalid. This helps catch unexpected input and ensures that the system only operates with known direction settings.
 				raise ValueError(f"Invalid direction message: {directionRecieved!r}")
 			if debug_l2: print(directionRecieved)
 			if debug_l2: print(direction)
