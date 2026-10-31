@@ -40,19 +40,20 @@ def clamp_pwm(pwm, limits): #pwm - value to check, limits - either None or a tup
 	return max(min_pwm, min(max_pwm, pwm)) # ensures that the PWM value is not less than min_pwm and not greater than max_pwm.
 	# bounds the commanded value; doesn't confirm the limoits are appropriate for the connected thruster of ESC
 
-# converts one joystick input value into a PWM command for a horizontal thruster, taking into account a deadzone and the direction of the thruster.
-def calcHorizontal(joyValue, thrusterNum, direction): #joyValue - joystick input, thrusterNum - selectts which thruster's direction value to use, direction - array of signs that determine whether this thruster's contribution is positive or negative
-	if -5 <= joyValue <= 5: 
-		return 0 # if the joystick input is within the deadzone (-5 to 5), return 0 to indicate no movement
-	joyValue = joyValue - ((abs(joyValue) / joyValue) * 5) # adjusts the joystick value to account for the deadzone, effectively reducing the input range by 5 units in the direction of the input
-	return joyValue * direction[thrusterNum] # multiplies the adjusted joystick value by the direction sign for the specified thruster, returning the final PWM command for that thruster based on the joystick input and its configured direction.
+# Converts a joystick input into a thruster command using its axis deadzone.
+def calc_with_deadzone(joy_value, thruster_num, direction, deadzone, adjustment):
+	if -deadzone <= joy_value <= deadzone:
+		return 0
+	adjusted_value = joy_value - ((abs(joy_value) / joy_value) * adjustment)
+	return adjusted_value * direction[thruster_num]
 
-# converts one joystick input value into a PWM command for a vertical thruster, taking into account a deadzone and the direction of the thruster.
-def calcVertical(joyValue, thrusterNum, direction): #joyValue - joystick input, thrusterNum - selects which thruster's direction value to use, direction - array of signs that determine whether this thruster's contribution is positive or negative
-	if -15 <= joyValue <= 15:
-		return 0 # if the joystick input is within the deadzone (-15 to 15), return 0 to indicate no movement
-	joyValue = joyValue - ((abs(joyValue) / joyValue) * 10) # adjusts the joystick value to account for the deadzone, effectively reducing the input range by 10 units in the direction of the input
-	return joyValue * direction[thrusterNum] # multiplies the adjusted joystick value by the direction sign for the specified thruster, returning the final PWM command for that thruster based on the joystick input and its configured direction.
+
+def calcHorizontal(joyValue, thrusterNum, direction):
+	return calc_with_deadzone(joyValue, thrusterNum, direction, 5, 5)
+
+
+def calcVertical(joyValue, thrusterNum, direction):
+	return calc_with_deadzone(joyValue, thrusterNum, direction, 15, 10)
 
 
 def main(ip_server, shield):
