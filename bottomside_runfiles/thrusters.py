@@ -126,7 +126,7 @@ def main(ip_server, shield):
 		clientSocket1.close()
 		set_neutral(thruster_channels, neutral_pwm)
 		raise
-
+# sends a message to the topside GUI to indicate that the bottomside is ready to receive joystick inputs.
 	joystick_stream = clientSocket.makefile("rb")
 	direction_stream = clientSocket1.makefile("rb")
 	telemetry_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
