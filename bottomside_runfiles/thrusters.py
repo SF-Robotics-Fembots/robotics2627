@@ -40,6 +40,22 @@ def clamp_pwm(pwm, limits): #pwm - value to check, limits - either None or a tup
 	return max(min_pwm, min(max_pwm, pwm)) # ensures that the PWM value is not less than min_pwm and not greater than max_pwm.
 	# bounds the commanded value; doesn't confirm the limoits are appropriate for the connected thruster of ESC
 
+
+def clamp_pwms(pwm_values, limits):
+	return [
+		clamp_pwm(pwm, limits[index])
+		for index, pwm in enumerate(pwm_values)
+	]
+
+
+def compensate_and_clamp_pwms(pwm_values, startup_thresholds, neutral_pwm, limits):
+	compensated_values = [
+		apply_startup_compensation(pwm, startup_thresholds[index], neutral_pwm)
+		for index, pwm in enumerate(pwm_values)
+	]
+	return clamp_pwms(compensated_values, limits)
+
+
 # Converts a joystick input into a thruster command using its axis deadzone.
 def calc_with_deadzone(joy_value, thruster_num, direction, deadzone, adjustment):
 	if -deadzone <= joy_value <= deadzone:
@@ -361,16 +377,9 @@ def main(ip_server, shield):
 
 			#Combine horizontal and vertical thruster values
 			allPowerVals = powerThrusterVals + powerVertThrusterVals
-			compensatedPowerVals = [
-				apply_startup_compensation(
-					val, thruster_startup_pwm[index], neutral_pwm
-				)
-				for index, val in enumerate(allPowerVals)
-			]
-			compensatedPowerVals = [
-				clamp_pwm(val, thruster_pwm_limits[index])
-				for index, val in enumerate(compensatedPowerVals)
-			]
+			compensatedPowerVals = compensate_and_clamp_pwms(
+				allPowerVals, thruster_startup_pwm, neutral_pwm, thruster_pwm_limits
+			)
 			neutralValues = (
 				[horiz_off_value] * len(powerThrusterVals)
 				+ [vert_off_value] * len(powerVertThrusterVals)
@@ -387,10 +396,9 @@ def main(ip_server, shield):
 					neutral + (value - neutral) * scale
 					for value, neutral in zip(compensatedPowerVals, neutralValues)
 				]
-				compensatedPowerVals = [
-					clamp_pwm(val, thruster_pwm_limits[index])
-					for index, val in enumerate(compensatedPowerVals)
-				]
+				compensatedPowerVals = clamp_pwms(
+					compensatedPowerVals, thruster_pwm_limits
+				)
 
 			# Combine corresponding thruster objects
 			# Apply compensated PWM to each thruster and print values in a single row
@@ -425,7 +433,7 @@ def main(ip_server, shield):
 
 
 		except Exception as exc:
-		set_neutral(thruster_channels, neutral_pwm)
+			set_neutral(thruster_channels, neutral_pwm)
 			print(f"Thruster input/connection error: {exc}")
 			joystick_stream.close()
 			direction_stream.close()
