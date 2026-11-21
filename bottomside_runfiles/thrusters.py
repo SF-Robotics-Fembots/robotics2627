@@ -122,6 +122,7 @@ def main(ip_server, shield):
 	rot_comp = 0#was -0.08
 	slide_comp =0 #0.19
 
+	# remember to change the channel numbers once told
 	shield_channels = [8, 12, 13, 11, 9, 14]
 	thruster_channels = [shield.channels[channel] for channel in shield_channels]
 
