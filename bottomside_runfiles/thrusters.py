@@ -305,7 +305,7 @@ def main(ip_server, shield):
 			for tNum in range(0, 4):
 				thrusterVals[tNum] = int(oldThrusterVals[tNum] * clockArray[tNum])
 
-			for vNum in range(len(vertical_mix)):
+			for vNum in range(len(vertical_roll_signs)):
 				vertThrusterVals[vNum] = int(oldVertThrusterVals[vNum] * clockVertArray[vNum])
 
 		# original print
