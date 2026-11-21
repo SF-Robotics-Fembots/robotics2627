@@ -42,27 +42,28 @@ def clamp_pwm(pwm, limits): #pwm - value to check, limits - either None or a tup
 	# bounds the commanded value; doesn't confirm the limoits are appropriate for the connected thruster of ESC
 
 
-def clamp_pwms(pwm_values, limits):
-	return [
-		clamp_pwm(pwm, limits[index])
-		for index, pwm in enumerate(pwm_values)
+def clamp_pwms(pwm_values, limits): #pwm_values - list of PWM values to check, limits - list of tuples containing (min_pwm, max_pwm) for each corresponding PWM value
+	return [ #starts bulding and returning a new list of clamped PWM values
+		clamp_pwm(pwm, limits[index]) #clamps each PWM value using the corresponding limits for that index
+		for index, pwm in enumerate(pwm_values) #enumerate() provides both the index and the value of each PWM in pwm_values, allowing the function to apply the correct limits to each PWM value
 	]
 
 
-def compensate_and_clamp_pwms(pwm_values, startup_thresholds, neutral_pwm, limits):
+def compensate_and_clamp_pwms(pwm_values, startup_thresholds, neutral_pwm, limits): # defines a function that applies startup compensation to a list of PWM values and then clamps them within specified limits. 
+	# It takes four parameters: pwm_values (list of PWM values to adjust), startup_thresholds (list of dictionaries containing positive and negative compensation thresholds for each thruster), neutral_pwm (the neutral PWM value for the thrusters), and limits (list of tuples specifying the min and max PWM values for each thruster).
 	compensated_values = [
-		apply_startup_compensation(pwm, startup_thresholds[index], neutral_pwm)
-		for index, pwm in enumerate(pwm_values)
+		apply_startup_compensation(pwm, startup_thresholds[index], neutral_pwm) #applies startup compensation to each PWM value using the corresponding thresholds and the neutral PWM value. This ensures that each thruster receives the appropriate compensation based on its specific characteristics.
+		for index, pwm in enumerate(pwm_values)#enumerate() provides both the index and the value of each PWM in pwm_values, allowing the function to apply the correct startup thresholds to each PWM value
 	]
-	return clamp_pwms(compensated_values, limits)
+	return clamp_pwms(compensated_values, limits) # returns the clamped PWM values
 
 
 # Converts a joystick input into a thruster command using its axis deadzone.
-def calc_with_deadzone(joy_value, thruster_num, direction, deadzone, adjustment):
-	if -deadzone <= joy_value <= deadzone:
-		return 0
-	adjusted_value = joy_value - ((abs(joy_value) / joy_value) * adjustment)
-	return adjusted_value * direction[thruster_num]
+def calc_with_deadzone(joy_value, thruster_num, direction, deadzone, adjustment): # defines a function that calculates the adjusted thruster command based on joystick input, taking into account a deadzone and an adjustment factor. The function takes five parameters: joy_value (the raw joystick input), thruster_num (the index of the thruster being controlled), direction (a list indicating the direction for each thruster), deadzone (the range around zero where joystick input is ignored), and adjustment (a value to adjust the output when outside the deadzone).
+	if -deadzone <= joy_value <= deadzone: # checks if the joystick input is within the deadzone range. If it is, the function returns 0, indicating no movement for that thruster.
+		return 0 # returns 0 if the joystick input is within the deadzone range
+	adjusted_value = joy_value - ((abs(joy_value) / joy_value) * adjustment) # calculates the adjusted joystick value by subtracting the adjustment factor from the raw joystick input. The adjustment is applied in the direction of the joystick input (positive or negative) to ensure that the output is appropriately scaled.
+	return adjusted_value * direction[thruster_num] # returns the final adjusted value for the thruster command, taking into account the direction for the specific thruster. This ensures that the thruster responds correctly to the joystick input while respecting the deadzone and adjustment factors.
 
 
 def calcHorizontal(joyValue, thrusterNum, direction):
