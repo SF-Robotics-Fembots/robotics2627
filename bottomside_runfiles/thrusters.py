@@ -23,11 +23,9 @@ def set_neutral(thruster_channels, neutral_pwm): # defines the function; thruste
 		)
 		raise RuntimeError(f"Failed to set neutral on {len(failures)} thruster(s): {details}") from failures[0][1]
 
-# converts a pulse-width value into the PWM format expected by the hardware then applies to one channel
-def set_throttle(channel, throttle_in, delay=0): #defines function; channel is a single PWM channel, throttle_in is the desired pulse width in microseconds, delay is optional - not used in the function
-	throttle_pwm = int(throttle_in / 10000 * 65536) # converts the pulse width in microseconds to the PWM duty cycle format expected by the hardware. The formula scales the input value (throttle_in) from a range of 0-10000 microseconds to a range of 0-65536, which is the resolution of the PWM controller.
-	channel.duty_cycle = throttle_pwm # applies duty cycle value to the specified channel, effectively setting the throttle for that thruster.
-	time.sleep(0) #'delay' but not actually delaying anything since its 0 seconds; actually don't know why this is necessary
+# Converts a pulse width in microseconds to a duty cycle and applies it to one channel.
+def set_throttle(channel, throttle_in):
+	channel.duty_cycle = int(throttle_in / 10000 * 65536)
 
 # ajusts the PWM value to account for startup compensation thresholds, ensuring that the thruster starts moving as expected. 
 # It takes into account the neutral PWM value and applies the appropriate compensation based on whether the input PWM is above or below neutral.
@@ -418,7 +416,7 @@ def main(ip_server, shield):
 				# Combine corresponding thruster objects
 				# Apply compensated PWM to each thruster and print values in a single row
 				for thruster, val in zip(thruster_channels, compensatedPowerVals):
-					thruster.duty_cycle = int(val / 10000 * 65536)
+					set_throttle(thruster, val)
 
 				# Send the commanded PWM pulse widths to the topside GUI. Keep this
 				# list-based format so adding thrusters only requires extending labels
