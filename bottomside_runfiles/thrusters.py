@@ -11,9 +11,17 @@ TELEMETRY_PORT = 7071
 def set_neutral(thruster_channels, neutral_pwm): # defines the function; thruster_channels is a collection of PWN channels
 	neutral_duty = int(neutral_pwm / 10000 * 65536) # sets the PWM frequency to about 100 Hz, 
 	#giving a 10000 microsecond period. so a neutral value of 1500 becomes a duty-cycle value of about 9830
-	for channel in thruster_channels: #for loop that goes through each channel in the thruster_channels collection
-		channel.duty_cycle = neutral_duty # sets the duty cycle for each thruster channel to the neutral value of 1500
-		#this does not mean it cuts power because neutral might not be exactly 1500 on the actual thruster
+	failures = []
+	for thruster_num, channel in enumerate(thruster_channels, start=1):
+		try:
+			channel.duty_cycle = neutral_duty
+		except Exception as exc:
+			failures.append((thruster_num, exc))
+	if failures:
+		details = "; ".join(
+			f"T{thruster_num}: {exc}" for thruster_num, exc in failures
+		)
+		raise RuntimeError(f"Failed to set neutral on {len(failures)} thruster(s): {details}") from failures[0][1]
 
 # converts a pulse-width value into the PWM format expected by the hardware then applies to one channel
 def set_throttle(channel, throttle_in, delay=0): #defines function; channel is a single PWM channel, throttle_in is the desired pulse width in microseconds, delay is optional - not used in the function
