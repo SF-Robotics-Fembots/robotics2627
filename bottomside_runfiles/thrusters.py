@@ -2,6 +2,7 @@ import json #decodes joystick messages
 import math #has math functions so you can do more complex calculations
 import socket #connects topside and bottomside/ client and server
 import time #delays code for a certain amount of time
+from contextlib import ExitStack
 
 #for the gui so cynthia can get bottomside pwm values
 TELEMETRY_PORT = 7071
@@ -140,306 +141,316 @@ def main(ip_server, shield):
 		set_neutral(thruster_channels, neutral_pwm)
 		raise
 # sends a message to the topside GUI to indicate that the bottomside creates read streams for joystick inputs.
-	joystick_stream = clientSocket.makefile("rb")
-	direction_stream = clientSocket1.makefile("rb")
-	telemetry_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	telemetry_address = (ip_server, TELEMETRY_PORT)
-	print("connected")
-	prevX = 0
-	prevY = 0
-	prevV = 0
-	prevR = 0
-	#everytime data is sent, previous values are set to 0 (updates & loops values)
+	joystick_stream = None
+	direction_stream = None
+	telemetry_socket = None
+	try:
+		joystick_stream = clientSocket.makefile("rb")
+		direction_stream = clientSocket1.makefile("rb")
+		telemetry_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		telemetry_address = (ip_server, TELEMETRY_PORT)
+		print("connected")
+		prevX = 0
+		prevY = 0
+		prevV = 0
+		prevR = 0
+		#everytime data is sent, previous values are set to 0 (updates & loops values)
 
-	directionRecieved = "a" #not in pilot inversion
-	direction = 1
+		directionRecieved = "a" #not in pilot inversion
+		direction = 1
 
-	# main loop
-	while True:
-		try:
-			message = joystick_stream.readline()
-			if not message:
-				raise ConnectionError("Joystick client disconnected")
-			dataFraud = message.decode("utf-8").strip()
-			thrusterMovements = json.loads(dataFraud)
-			if not isinstance(thrusterMovements, dict):
-				raise ValueError("Joystick message must be a JSON object")
-
-			speed_keys = (
-				"x_speed",
-				"y_speed",
-				"r_speed",
-				"v_speed",
-				"roll_speed",
-			)
-			speeds = [thrusterMovements.get(key) for key in speed_keys]
-			if any(
-				isinstance(value, bool)
-				or not isinstance(value, (int, float))
-				or not math.isfinite(value)
-				or not -1 <= value <= 1
-				for value in speeds
-			):
-				raise ValueError("Joystick speeds must be finite numbers in [-1, 1]")
-
-			thrusterMovements = dict(zip(speed_keys, map(float, speeds)))
-			#print(thrusterMovements)
-			#time.sleep(1)
-			if debug_l2: print("datafraud: " + dataFraud)
-			#data = (clientSocket.recv(1024)).decode()
-
-			print(f"Loop Start -------------------------------------------------")
-
-
-			
-			#x_speed = x_speed[1:]
-			#[1:]: used for inverse orders/directions
-			x_speed = thrusterMovements['x_speed']
-			x_speed = float(x_speed)
-	
-			#y_speed = data[data.find('y'):data.find('r')]
-			#y_speed = y_speed[1:]
-			y_speed = thrusterMovements['y_speed']
-			y_speed = float(y_speed)
-			
-			#r_speed = data[data.find('r'):data.find('v')]
-			#r_speed = r_speed[1:]
-			r_speed = thrusterMovements['r_speed']
-			r_speed = float(r_speed)
-			
-			#v_speed = data[data.find('v'):data.find('x')]
-			#v_speed = v_speed[1:]
-			v_speed = thrusterMovements['v_speed']
-			v_speed = float(v_speed)
-			roll_speed = thrusterMovements["roll_speed"]
-			
-
-			#lines 157-190: translates first measured joystick values, which comes as a float, from top side
-			#then, the float goes through a char*
-			#the float is translated through the char* (via parsing) into another float that the top computer can understand&receive
-
-			diffX = x_speed - prevX
-			diffY = y_speed - prevY
-			diffR = r_speed - prevR
-			diffV = v_speed - prevV
-			#finding difference of speeds to evaluate which ones need power limiting 
-			#values used in next if statement
-			print(f"Time:{time.time()} | from topside - x_speed: {x_speed} | prevX: {prevX} |  y_speed: {y_speed} | prevY: {prevY}")
-
-#MOD: diffValue = value_speed - prevValue
-
-		# 	if (abs(diffX) > dynamic_change):
-		# 		x_speed = prevX + ((diffX/abs(diffX)) * dynamic_change)
-		# 	if (abs(diffY) > dynamic_change):
-		# 		y_speed = prevY + ((diffY/abs(diffY)) * dynamic_change)
-		# 	if (abs(diffR) > dynamic_change):
-		# 		r_speed = prevR + ((diffR/abs(diffR)) * dynamic_change)
-		# 	if (abs(diffV) > dynamic_change):
-		# 		v_speed = prevV + ((diffV/abs(diffV)) * dynamic_change)
-		# #helps manage power
-		#if diffvalue is greater than .05, then it will assign speed a lower values by multiplying diffValue by .1
-			print(f"Time:{time.time()} | after-adjusment x_speed:{x_speed} | y_speed:{y_speed} | r_speed:{r_speed} | v_speed:{v_speed}")
-
-			prevX = x_speed
-			prevY = y_speed
-			prevR = r_speed
-			prevV = v_speed
-
-#MOD: prevValue = value_speed
-
-			# multiplies original values by 100 (necessary for calculations)
-			x_speed = int((x_speed)*50)
-			y_speed = int((y_speed)*50)
-			r_speed = int((r_speed)*25)
-			v_speed = int(v_speed * 85)
-			roll_speed = int(roll_speed * roll_scale)
-
-			#print("R Speed: " + str(r_speed))
-			#rotation compensation :(
-			r_speed = int(r_speed + rot_comp * y_speed)
-			r_speed = int(r_speed + slide_comp * x_speed)
-
-		#reads the pilot inversion message from topside and sets the direction variable accordingly. 
-		#This allows the thruster control logic to adjust for pilot inversion, ensuring that the thrusters respond correctly to joystick inputs regardless of the pilot's orientation or preferences.	
-			direction_message = direction_stream.readline() # reads a line from the direction_stream, which is expected to contain a message indicating the desired direction for pilot inversion. 
-			#This message is used to determine how the thruster control logic should interpret joystick inputs.
-			if not direction_message: #checks if the direction_message is empty or None, which would indicate that the connection to the direction client has been lost or closed.
-				raise ConnectionError("Direction client disconnected")
-			directionRecieved = direction_message.decode("ascii").strip() # decodes the received byte message into a string using ASCII encoding and removes any leading or trailing whitespace. This prepares the message for further processing to determine the direction setting.
-			if (directionRecieved == "a"): #if the received message is "a", it sets the direction variable to 1, indicating normal operation without inversion.
-				direction = 1
-			elif (directionRecieved == "b"): #if the received message is "b", it sets the direction variable to -1, indicating that pilot inversion is active and the thruster control logic should invert the joystick inputs accordingly.
-				direction = -1
-			elif directionRecieved == "c": #if the received message is "c", it sets the direction variable to 0, indicating that the thrusters should be disabled or set to a neutral state, effectively stopping any movement.
-				direction = direction
-			else: #if the received message does not match any of the expected values ("a", "b", or "c"), it raises a ValueError with a message indicating that the direction message is invalid. This helps catch unexpected input and ensures that the system only operates with known direction settings.
-				raise ValueError(f"Invalid direction message: {directionRecieved!r}")
-			if debug_l2: print(directionRecieved)
-			if debug_l2: print(direction)
-
-
-			#xDirArray = [-1*direction, 1*direction, -1*direction, 1*direction]
-			#yDirArray = [1*direction, 1*direction, -1*direction, -1*direction]
-			#rDirArray = [-1, 1, 1, -1]
-			#third thruster is now cw so the signs got flipped
-
-
-            #REMEMBER TO TEST THESE NOW
-			# FWD/BACK is "Y", SIDE TO SIDE is "X"
-			# this is thruster 1 (front right), 2 (back right), 3 (front left), 4 (back left)
-			# THIS IS FOR THRUSTER MOUNTING- CW/CCW is below (clock_array)
-			
-			yDirArray = [1*direction, -1*direction, 1*direction, -1*direction]
-			xDirArray = [-1*direction, -1*direction, 1*direction, 1*direction]
-			rDirArray = [-1, 1, 1, -1]
-			# CHECK HARDWARE: Verify each vertical ESC/motor direction.
-			vDirArray = [1] * len(vertical_roll_signs)
-
-			# array for each horizontal thruster value
-			oldThrusterVals = [0, 0, 0, 0]
-			# array for each vertical thruster value
-			oldVertThrusterVals = [0] * len(vertical_roll_signs)
-
-			# loop to collect value for each thruster using horizontal calculation function
-			for tNum in range(0,4):
-				#goes through code four times
-				oldThrusterVals[tNum] = int((calcHorizontal(x_speed, tNum, xDirArray) + calcHorizontal(y_speed, tNum, yDirArray) + calcHorizontal(r_speed, tNum, rDirArray)))
-			# loop to collect value for each thruster using vertical calculation function
-			for vNum, roll_sign in enumerate(vertical_roll_signs):
-				combined_vertical = v_speed + roll_speed * roll_sign
-				oldVertThrusterVals[vNum] = int(
-					calcVertical(combined_vertical, vNum, vDirArray)
-				)
-
-			clockArray = [1, -1, 1, 1]    #1 for CW, -1 for CCW
-			# CHECK HARDWARE: Verify/reverse these signs after testing each vertical thruster.
-			clockVertArray = [1] * len(vertical_roll_signs)
-
-			thrusterVals = [0, 0, 0, 0]
-			vertThrusterVals = [0] * len(vertical_roll_signs)
-
-			for tNum in range(0, 4):
-				thrusterVals[tNum] = int(oldThrusterVals[tNum] * clockArray[tNum])
-
-			for vNum in range(len(vertical_roll_signs)):
-				vertThrusterVals[vNum] = int(oldVertThrusterVals[vNum] * clockVertArray[vNum])
-
-		# original print
-			# adjusting range
-			max_thruster = 0
-			for thrusters in range(0,4):
-				max_thruster = max(max_thruster, abs(thrusterVals[thrusters]))
-
-			if (max_thruster != 0) and (max_thruster >= max_horizontal_thrust):
-				for thrusters in range(0, 4):
-					thrusterVals[thrusters] = int(thrusterVals[thrusters] * (max_horizontal_thrust / max_thruster))
-					#lines 284-291: finds the maximum value of all throttle values, then limits them if needed
-
-			max_vert_thruster = 0
-			for vertThrusters in range(len(vertThrusterVals)):
-				max_vert_thruster = max(max_vert_thruster, abs(vertThrusterVals[vertThrusters]))
-
-			if (max_vert_thruster != 0) and (max_vert_thruster >= max_vertical_thrust):
-				for vertThrusters in range(len(vertThrusterVals)):
-					vertThrusterVals[vertThrusters] = int(vertThrusterVals[vertThrusters] * (max_vertical_thrust / max_vert_thruster))
-
-
-			# new lists for the adjusted values for our power functions
-			powerThrusterVals = [0, 0, 0, 0]
-			powerVertThrusterVals = [0] * len(vertical_roll_signs)
-
-			# both for loops adjust the range of the thrusters to 1000-2000
-			for thrusters in range(0, 4):
-				if (thrusterVals[thrusters] == 0):
-					powerThrusterVals[thrusters] = horiz_off_value
-				else:
-					#powerThrusterVals[thrusters] = 1489 + (((abs(thrusterVals[thrusters]))/thrusterVals[thrusters]) * (25 + (thrusterVals[thrusters] * 4.64)))
-					powerThrusterVals[thrusters] = horiz_off_value + ((abs(thrusterVals[thrusters])/thrusterVals[thrusters]) * horiz_thrust_offset) + (thrusterVals[thrusters] * 7.0)
-			#was 25 and 4.64
-			#using 1489 because 1489 = median of thruster calibration (all thrusters stop at 1489)
-			for vertThrusters in range(len(vertThrusterVals)):
-				if debug_l2: print(vertThrusterVals[vertThrusters])
-				if (vertThrusterVals[vertThrusters] == 0):
-					powerVertThrusterVals[vertThrusters] = vert_off_value
-				else:
-					#powerVertThrusterVals[vertThrusters] = 1489 + (((abs(vertThrusterVals[vertThrusters]))/vertThrusterVals[vertThrusters]) * (25 + (vertThrusterVals[vertThrusters] * 4.64)))
-					powerVertThrusterVals[vertThrusters] = vert_off_value + ((abs(vertThrusterVals[vertThrusters])/vertThrusterVals[vertThrusters]) * vert_thrust_offset) + (vertThrusterVals[vertThrusters] * 7.0)
-					#changed from *25 to *50 because verts on this year's robot have a 50 uS deadzone & horizontals only have 25 uS deadzone on each side of center
-					#abs(vertThrusterVals[vertThrusters]) just tells direction
-
-
-
-			#print("third print")
-			#debug_l2 = 1
-			
-			#made changes starting here for duty cycle
-			if debug_l2: print(powerThrusterVals)
-
-			#Combine horizontal and vertical thruster values
-			allPowerVals = powerThrusterVals + powerVertThrusterVals
-			compensatedPowerVals = compensate_and_clamp_pwms(
-				allPowerVals, thruster_startup_pwm, neutral_pwm, thruster_pwm_limits
-			)
-			neutralValues = (
-				[horiz_off_value] * len(powerThrusterVals)
-				+ [vert_off_value] * len(powerVertThrusterVals)
-			)
-			total_pwm_delta_us = sum(
-				abs(value - neutral)
-				for value, neutral in zip(compensatedPowerVals, neutralValues)
-			)
-			print(f"Aggregate PWM delta: {total_pwm_delta_us:.1f} us")
-			if total_pwm_delta_us > max_total_pwm_delta_us:
-				scale = max_total_pwm_delta_us / total_pwm_delta_us
-				print(f"Aggregate PWM scale: {scale:.3f}")
-				compensatedPowerVals = [
-					neutral + (value - neutral) * scale
-					for value, neutral in zip(compensatedPowerVals, neutralValues)
-				]
-				compensatedPowerVals = clamp_pwms(
-					compensatedPowerVals, thruster_pwm_limits
-				)
-
-			# Combine corresponding thruster objects
-			# Apply compensated PWM to each thruster and print values in a single row
-			for thruster, val in zip(thruster_channels, compensatedPowerVals):
-				thruster.duty_cycle = int(val / 10000 * 65536)
-
-			# Send the commanded PWM pulse widths to the topside GUI. Keep this
-			# list-based format so adding thrusters only requires extending labels
-			# and values in this controller.
-			labels = [f"T{i + 1}" for i in range(len(compensatedPowerVals))]
-			telemetry = {
-				"thrusters": [
-					{"label": label, "pwm": int(round(val))}
-					for label, val in zip(labels, compensatedPowerVals)
-				]
-			}
+		# main loop
+		while True:
 			try:
-				telemetry_socket.sendto(json.dumps(telemetry).encode("utf-8"), telemetry_address)
-			except OSError:
-				# Telemetry is for display only; a network issue must not stop control.
-				pass
+				message = joystick_stream.readline()
+				if not message:
+					raise ConnectionError("Joystick client disconnected")
+				dataFraud = message.decode("utf-8").strip()
+				thrusterMovements = json.loads(dataFraud)
+				if not isinstance(thrusterMovements, dict):
+					raise ValueError("Joystick message must be a JSON object")
 
-			#print(*allPowerVals)
+				speed_keys = (
+					"x_speed",
+					"y_speed",
+					"r_speed",
+					"v_speed",
+					"roll_speed",
+				)
+				speeds = [thrusterMovements.get(key) for key in speed_keys]
+				if any(
+					isinstance(value, bool)
+					or not isinstance(value, (int, float))
+					or not math.isfinite(value)
+					or not -1 <= value <= 1
+					for value in speeds
+				):
+					raise ValueError("Joystick speeds must be finite numbers in [-1, 1]")
 
-			# Print PWM values in a single row with labels
-			labels = [f"T{i + 1}" for i in range(len(compensatedPowerVals))]
-			print(f"Time:{time.time()} | " + " | ".join(f"{label}:{val}" for label, val in zip(labels, compensatedPowerVals)))
-			
-			# Print actual ESC values (duty cycle)
-			esc_vals = [int(val / 10000 * 65536) for val in compensatedPowerVals]
-			print(f"ESC Values: " + " | ".join(f"{label}:{val}" for label, val in zip(labels, esc_vals)))
+				thrusterMovements = dict(zip(speed_keys, map(float, speeds)))
+				#print(thrusterMovements)
+				#time.sleep(1)
+				if debug_l2: print("datafraud: " + dataFraud)
+				#data = (clientSocket.recv(1024)).decode()
+
+				print(f"Loop Start -------------------------------------------------")
 
 
-		except Exception as exc:
-			set_neutral(thruster_channels, neutral_pwm)
-			print(f"Thruster input/connection error: {exc}")
-			joystick_stream.close()
-			direction_stream.close()
-			clientSocket.close()
-			clientSocket1.close()
-			telemetry_socket.close()
-			if isinstance(exc, ConnectionError):
-				break
-			raise
+
+				#x_speed = x_speed[1:]
+				#[1:]: used for inverse orders/directions
+				x_speed = thrusterMovements['x_speed']
+				x_speed = float(x_speed)
+
+				#y_speed = data[data.find('y'):data.find('r')]
+				#y_speed = y_speed[1:]
+				y_speed = thrusterMovements['y_speed']
+				y_speed = float(y_speed)
+
+				#r_speed = data[data.find('r'):data.find('v')]
+				#r_speed = r_speed[1:]
+				r_speed = thrusterMovements['r_speed']
+				r_speed = float(r_speed)
+
+				#v_speed = data[data.find('v'):data.find('x')]
+				#v_speed = v_speed[1:]
+				v_speed = thrusterMovements['v_speed']
+				v_speed = float(v_speed)
+				roll_speed = thrusterMovements["roll_speed"]
+
+
+				#lines 157-190: translates first measured joystick values, which comes as a float, from top side
+				#then, the float goes through a char*
+				#the float is translated through the char* (via parsing) into another float that the top computer can understand&receive
+
+				diffX = x_speed - prevX
+				diffY = y_speed - prevY
+				diffR = r_speed - prevR
+				diffV = v_speed - prevV
+				#finding difference of speeds to evaluate which ones need power limiting
+				#values used in next if statement
+				print(f"Time:{time.time()} | from topside - x_speed: {x_speed} | prevX: {prevX} |  y_speed: {y_speed} | prevY: {prevY}")
+
+	#MOD: diffValue = value_speed - prevValue
+
+			# 	if (abs(diffX) > dynamic_change):
+			# 		x_speed = prevX + ((diffX/abs(diffX)) * dynamic_change)
+			# 	if (abs(diffY) > dynamic_change):
+			# 		y_speed = prevY + ((diffY/abs(diffY)) * dynamic_change)
+			# 	if (abs(diffR) > dynamic_change):
+			# 		r_speed = prevR + ((diffR/abs(diffR)) * dynamic_change)
+			# 	if (abs(diffV) > dynamic_change):
+			# 		v_speed = prevV + ((diffV/abs(diffV)) * dynamic_change)
+			# #helps manage power
+			#if diffvalue is greater than .05, then it will assign speed a lower values by multiplying diffValue by .1
+				print(f"Time:{time.time()} | after-adjusment x_speed:{x_speed} | y_speed:{y_speed} | r_speed:{r_speed} | v_speed:{v_speed}")
+
+				prevX = x_speed
+				prevY = y_speed
+				prevR = r_speed
+				prevV = v_speed
+
+	#MOD: prevValue = value_speed
+
+				# multiplies original values by 100 (necessary for calculations)
+				x_speed = int((x_speed)*50)
+				y_speed = int((y_speed)*50)
+				r_speed = int((r_speed)*25)
+				v_speed = int(v_speed * 85)
+				roll_speed = int(roll_speed * roll_scale)
+
+				#print("R Speed: " + str(r_speed))
+				#rotation compensation :(
+				r_speed = int(r_speed + rot_comp * y_speed)
+				r_speed = int(r_speed + slide_comp * x_speed)
+
+			#reads the pilot inversion message from topside and sets the direction variable accordingly.
+			#This allows the thruster control logic to adjust for pilot inversion, ensuring that the thrusters respond correctly to joystick inputs regardless of the pilot's orientation or preferences.
+				direction_message = direction_stream.readline() # reads a line from the direction_stream, which is expected to contain a message indicating the desired direction for pilot inversion.
+				#This message is used to determine how the thruster control logic should interpret joystick inputs.
+				if not direction_message: #checks if the direction_message is empty or None, which would indicate that the connection to the direction client has been lost or closed.
+					raise ConnectionError("Direction client disconnected")
+				directionRecieved = direction_message.decode("ascii").strip() # decodes the received byte message into a string using ASCII encoding and removes any leading or trailing whitespace. This prepares the message for further processing to determine the direction setting.
+				if (directionRecieved == "a"): #if the received message is "a", it sets the direction variable to 1, indicating normal operation without inversion.
+					direction = 1
+				elif (directionRecieved == "b"): #if the received message is "b", it sets the direction variable to -1, indicating that pilot inversion is active and the thruster control logic should invert the joystick inputs accordingly.
+					direction = -1
+				elif directionRecieved == "c": #if the received message is "c", it sets the direction variable to 0, indicating that the thrusters should be disabled or set to a neutral state, effectively stopping any movement.
+					direction = direction
+				else: #if the received message does not match any of the expected values ("a", "b", or "c"), it raises a ValueError with a message indicating that the direction message is invalid. This helps catch unexpected input and ensures that the system only operates with known direction settings.
+					raise ValueError(f"Invalid direction message: {directionRecieved!r}")
+				if debug_l2: print(directionRecieved)
+				if debug_l2: print(direction)
+
+
+				#xDirArray = [-1*direction, 1*direction, -1*direction, 1*direction]
+				#yDirArray = [1*direction, 1*direction, -1*direction, -1*direction]
+				#rDirArray = [-1, 1, 1, -1]
+				#third thruster is now cw so the signs got flipped
+
+
+	            #REMEMBER TO TEST THESE NOW
+				# FWD/BACK is "Y", SIDE TO SIDE is "X"
+				# this is thruster 1 (front right), 2 (back right), 3 (front left), 4 (back left)
+				# THIS IS FOR THRUSTER MOUNTING- CW/CCW is below (clock_array)
+
+				yDirArray = [1*direction, -1*direction, 1*direction, -1*direction]
+				xDirArray = [-1*direction, -1*direction, 1*direction, 1*direction]
+				rDirArray = [-1, 1, 1, -1]
+				# CHECK HARDWARE: Verify each vertical ESC/motor direction.
+				vDirArray = [1] * len(vertical_roll_signs)
+
+				# array for each horizontal thruster value
+				oldThrusterVals = [0, 0, 0, 0]
+				# array for each vertical thruster value
+				oldVertThrusterVals = [0] * len(vertical_roll_signs)
+
+				# loop to collect value for each thruster using horizontal calculation function
+				for tNum in range(0,4):
+					#goes through code four times
+					oldThrusterVals[tNum] = int((calcHorizontal(x_speed, tNum, xDirArray) + calcHorizontal(y_speed, tNum, yDirArray) + calcHorizontal(r_speed, tNum, rDirArray)))
+				# loop to collect value for each thruster using vertical calculation function
+				for vNum, roll_sign in enumerate(vertical_roll_signs):
+					combined_vertical = v_speed + roll_speed * roll_sign
+					oldVertThrusterVals[vNum] = int(
+						calcVertical(combined_vertical, vNum, vDirArray)
+					)
+
+				clockArray = [1, -1, 1, 1]    #1 for CW, -1 for CCW
+				# CHECK HARDWARE: Verify/reverse these signs after testing each vertical thruster.
+				clockVertArray = [1] * len(vertical_roll_signs)
+
+				thrusterVals = [0, 0, 0, 0]
+				vertThrusterVals = [0] * len(vertical_roll_signs)
+
+				for tNum in range(0, 4):
+					thrusterVals[tNum] = int(oldThrusterVals[tNum] * clockArray[tNum])
+
+				for vNum in range(len(vertical_roll_signs)):
+					vertThrusterVals[vNum] = int(oldVertThrusterVals[vNum] * clockVertArray[vNum])
+
+			# original print
+				# adjusting range
+				max_thruster = 0
+				for thrusters in range(0,4):
+					max_thruster = max(max_thruster, abs(thrusterVals[thrusters]))
+
+				if (max_thruster != 0) and (max_thruster >= max_horizontal_thrust):
+					for thrusters in range(0, 4):
+						thrusterVals[thrusters] = int(thrusterVals[thrusters] * (max_horizontal_thrust / max_thruster))
+						#lines 284-291: finds the maximum value of all throttle values, then limits them if needed
+
+				max_vert_thruster = 0
+				for vertThrusters in range(len(vertThrusterVals)):
+					max_vert_thruster = max(max_vert_thruster, abs(vertThrusterVals[vertThrusters]))
+
+				if (max_vert_thruster != 0) and (max_vert_thruster >= max_vertical_thrust):
+					for vertThrusters in range(len(vertThrusterVals)):
+						vertThrusterVals[vertThrusters] = int(vertThrusterVals[vertThrusters] * (max_vertical_thrust / max_vert_thruster))
+
+
+				# new lists for the adjusted values for our power functions
+				powerThrusterVals = [0, 0, 0, 0]
+				powerVertThrusterVals = [0] * len(vertical_roll_signs)
+
+				# both for loops adjust the range of the thrusters to 1000-2000
+				for thrusters in range(0, 4):
+					if (thrusterVals[thrusters] == 0):
+						powerThrusterVals[thrusters] = horiz_off_value
+					else:
+						#powerThrusterVals[thrusters] = 1489 + (((abs(thrusterVals[thrusters]))/thrusterVals[thrusters]) * (25 + (thrusterVals[thrusters] * 4.64)))
+						powerThrusterVals[thrusters] = horiz_off_value + ((abs(thrusterVals[thrusters])/thrusterVals[thrusters]) * horiz_thrust_offset) + (thrusterVals[thrusters] * 7.0)
+				#was 25 and 4.64
+				#using 1489 because 1489 = median of thruster calibration (all thrusters stop at 1489)
+				for vertThrusters in range(len(vertThrusterVals)):
+					if debug_l2: print(vertThrusterVals[vertThrusters])
+					if (vertThrusterVals[vertThrusters] == 0):
+						powerVertThrusterVals[vertThrusters] = vert_off_value
+					else:
+						#powerVertThrusterVals[vertThrusters] = 1489 + (((abs(vertThrusterVals[vertThrusters]))/vertThrusterVals[vertThrusters]) * (25 + (vertThrusterVals[vertThrusters] * 4.64)))
+						powerVertThrusterVals[vertThrusters] = vert_off_value + ((abs(vertThrusterVals[vertThrusters])/vertThrusterVals[vertThrusters]) * vert_thrust_offset) + (vertThrusterVals[vertThrusters] * 7.0)
+						#changed from *25 to *50 because verts on this year's robot have a 50 uS deadzone & horizontals only have 25 uS deadzone on each side of center
+						#abs(vertThrusterVals[vertThrusters]) just tells direction
+
+
+
+				#print("third print")
+				#debug_l2 = 1
+
+				#made changes starting here for duty cycle
+				if debug_l2: print(powerThrusterVals)
+
+				#Combine horizontal and vertical thruster values
+				allPowerVals = powerThrusterVals + powerVertThrusterVals
+				compensatedPowerVals = compensate_and_clamp_pwms(
+					allPowerVals, thruster_startup_pwm, neutral_pwm, thruster_pwm_limits
+				)
+				neutralValues = (
+					[horiz_off_value] * len(powerThrusterVals)
+					+ [vert_off_value] * len(powerVertThrusterVals)
+				)
+				total_pwm_delta_us = sum(
+					abs(value - neutral)
+					for value, neutral in zip(compensatedPowerVals, neutralValues)
+				)
+				print(f"Aggregate PWM delta: {total_pwm_delta_us:.1f} us")
+				if total_pwm_delta_us > max_total_pwm_delta_us:
+					scale = max_total_pwm_delta_us / total_pwm_delta_us
+					print(f"Aggregate PWM scale: {scale:.3f}")
+					compensatedPowerVals = [
+						neutral + (value - neutral) * scale
+						for value, neutral in zip(compensatedPowerVals, neutralValues)
+					]
+					compensatedPowerVals = clamp_pwms(
+						compensatedPowerVals, thruster_pwm_limits
+					)
+
+				# Combine corresponding thruster objects
+				# Apply compensated PWM to each thruster and print values in a single row
+				for thruster, val in zip(thruster_channels, compensatedPowerVals):
+					thruster.duty_cycle = int(val / 10000 * 65536)
+
+				# Send the commanded PWM pulse widths to the topside GUI. Keep this
+				# list-based format so adding thrusters only requires extending labels
+				# and values in this controller.
+				labels = [f"T{i + 1}" for i in range(len(compensatedPowerVals))]
+				telemetry = {
+					"thrusters": [
+						{"label": label, "pwm": int(round(val))}
+						for label, val in zip(labels, compensatedPowerVals)
+					]
+				}
+				try:
+					telemetry_socket.sendto(json.dumps(telemetry).encode("utf-8"), telemetry_address)
+				except OSError:
+					# Telemetry is for display only; a network issue must not stop control.
+					pass
+
+				#print(*allPowerVals)
+
+				# Print PWM values in a single row with labels
+				labels = [f"T{i + 1}" for i in range(len(compensatedPowerVals))]
+				print(f"Time:{time.time()} | " + " | ".join(f"{label}:{val}" for label, val in zip(labels, compensatedPowerVals)))
+
+				# Print actual ESC values (duty cycle)
+				esc_vals = [int(val / 10000 * 65536) for val in compensatedPowerVals]
+				print(f"ESC Values: " + " | ".join(f"{label}:{val}" for label, val in zip(labels, esc_vals)))
+
+
+			except Exception as exc:
+				print(f"Thruster input/connection error: {exc}")
+				if isinstance(exc, ConnectionError):
+					break
+				raise
+	finally:
+		with ExitStack() as cleanup_stack:
+			for resource in (
+				clientSocket,
+				clientSocket1,
+				telemetry_socket,
+				direction_stream,
+				joystick_stream,
+			):
+				if resource is not None:
+					cleanup_stack.callback(resource.close)
+			cleanup_stack.callback(set_neutral, thruster_channels, neutral_pwm)
