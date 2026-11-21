@@ -2,7 +2,7 @@ import json #decodes joystick messages
 import math #has math functions so you can do more complex calculations
 import socket #connects topside and bottomside/ client and server
 import time #delays code for a certain amount of time
-from contextlib import ExitStack
+from contextlib import ExitStack # allows for the management of multiple context managers in a single block, ensuring that resources are properly cleaned up even if an error occurs. This is useful for managing network connections and file streams in this code.
 
 #for the gui so cynthia can get bottomside pwm values
 TELEMETRY_PORT = 7071
