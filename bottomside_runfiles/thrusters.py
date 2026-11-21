@@ -285,7 +285,7 @@ def main(ip_server, shield):
 					direction = 1
 				elif (directionRecieved == "b"): #if the received message is "b", it sets the direction variable to -1, indicating that pilot inversion is active and the thruster control logic should invert the joystick inputs accordingly.
 					direction = -1
-				elif directionRecieved == "c": #if the received message is "c", it sets the direction variable to 0, indicating that the thrusters should be disabled or set to a neutral state, effectively stopping any movement.
+				elif directionRecieved == "c": #if the received message is "c", no change it keeps the last direction value, allowing the system to maintain its current state without altering the thruster control logic.
 					direction = direction
 				else: #if the received message does not match any of the expected values ("a", "b", or "c"), it raises a ValueError with a message indicating that the direction message is invalid. This helps catch unexpected input and ensures that the system only operates with known direction settings.
 					raise ValueError(f"Invalid direction message: {directionRecieved!r}")
